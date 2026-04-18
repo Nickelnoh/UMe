@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from flask import Flask, g, jsonify, redirect, render_template, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, join_room
-from sqlalchemy import func
+from sqlalchemy import func, text
 from werkzeug.utils import secure_filename
 
 try:
@@ -73,6 +73,23 @@ def parse_phone(phone_raw: str) -> str:
         raise ValueError("Некорректный номер телефона.")
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
+
+
+
+def parse_login_code(code_raw: str) -> str:
+    code = (code_raw or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        raise ValueError("Код должен состоять из 6 цифр.")
+    return code
+
+
+def normalize_nickname(nickname_raw: str) -> str:
+    nickname = (nickname_raw or "").strip()
+    if not nickname or len(nickname) < 3 or len(nickname) > 32:
+        raise ValueError("Никнейм должен быть длиной от 3 до 32 символов.")
+    if not all(ch.isalnum() or ch in "._-" for ch in nickname):
+        raise ValueError("Никнейм может содержать буквы, цифры, точку, дефис и подчёркивание.")
+    return nickname
 
 def client_ip() -> str:
     forwarded = request.headers.get("X-Forwarded-For", "")
@@ -149,8 +166,9 @@ class User(db.Model):
     __tablename__ = "users"
 
     id = db.Column(db.String(36), primary_key=True, default=new_uuid)
-    phone_e164 = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    phone_e164 = db.Column(db.String(32), nullable=True, unique=True, index=True)
     nickname = db.Column(db.String(32), nullable=True, unique=True, index=True)
+    login_code_hash = db.Column(db.String(64), nullable=True)
     avatar_attachment_id = db.Column(db.String(36), db.ForeignKey("attachments.id"), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
@@ -166,7 +184,7 @@ class User(db.Model):
     def to_dict(self):
         return {
             **self.to_public_dict(),
-            "phone_e164": self.phone_e164,
+            "has_login_code": bool(self.login_code_hash),
         }
 
 
@@ -503,6 +521,27 @@ def create_or_get_user_by_phone(phone_e164: str) -> User:
     return user
 
 
+def verify_login_code(user: User, code: str) -> bool:
+    if not user.login_code_hash:
+        return False
+    return hmac.compare_digest(user.login_code_hash, hash_secret(f"login:{user.id}:{code}"))
+
+
+def set_login_code(user: User, code: str) -> None:
+    user.login_code_hash = hash_secret(f"login:{user.id}:{code}")
+
+
+def create_user_with_login_code(nickname: str, code: str) -> User:
+    user = User(phone_e164=f"local:{new_uuid()}", nickname=nickname)
+    set_login_code(user, code)
+    db.session.add(user)
+    db.session.flush()
+    if not UserSetting.query.filter_by(user_id=user.id).first():
+        db.session.add(UserSetting(user_id=user.id, theme="dark"))
+    db.session.commit()
+    return user
+
+
 def auth_rate_limited(phone_e164: str) -> bool:
     cutoff = utcnow() - timedelta(minutes=15)
     phone_count = AuthCode.query.filter(
@@ -611,80 +650,54 @@ def register_routes(flask_app: Flask):
         ).order_by(User.nickname.asc()).limit(12).all()
         return jsonify({"ok": True, "users": [user.to_public_dict() for user in users]})
 
-    @flask_app.post("/api/auth/send-code")
-    def api_auth_send_code():
+    @flask_app.post("/api/auth/register")
+    def api_auth_register():
         payload = request.get_json(silent=True) or {}
         try:
-            phone_e164 = parse_phone(payload.get("phone", ""))
+            nickname = normalize_nickname(payload.get("nickname", ""))
+            code = parse_login_code(payload.get("code", ""))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
-        if auth_rate_limited(phone_e164):
-            return json_error("Слишком много запросов. Попробуйте позже.", 429)
+        if User.query.filter(func.lower(User.nickname) == nickname.lower()).first():
+            return json_error("Такой никнейм уже занят.", 409)
 
-        current_code = latest_active_code(phone_e164)
-        if current_code and (utcnow() - current_code.created_at).total_seconds() < flask_app.config["AUTH_CODE_RESEND_WINDOW_SECONDS"]:
-            return json_error("Повторная отправка пока недоступна. Подождите немного.", 429)
+        user = create_user_with_login_code(nickname, code)
+        return create_session_response(user)
 
-        code = "".join(secrets.choice("0123456789") for _ in range(6))
-        provider = "stub" if flask_app.config["USE_SMS_STUB"] else flask_app.config["SMS_PROVIDER"]
-        auth_code = AuthCode(
-            phone_e164=phone_e164,
-            code_hash=(hash_secret(f"{phone_e164}:{code}") if provider == "stub" else None),
-            provider=provider,
-            ip_address=client_ip(),
-            expires_at=utcnow() + timedelta(seconds=flask_app.config["AUTH_CODE_TTL_SECONDS"]),
-        )
-        db.session.add(auth_code)
-        db.session.commit()
-
-        send_verification_code(phone_e164, code)
-        response = {
-            "ok": True,
-            "ttl_seconds": flask_app.config["AUTH_CODE_TTL_SECONDS"],
-            "sms_stub": flask_app.config["USE_SMS_STUB"],
-        }
-        if flask_app.config["USE_SMS_STUB"] and flask_app.config["DEBUG_RETURN_SMS_CODE"]:
-            response["debug_code"] = code
-        return jsonify(response)
-
-    @flask_app.post("/api/auth/verify-code")
-    def api_auth_verify_code():
+    @flask_app.post("/api/auth/login")
+    def api_auth_login():
         payload = request.get_json(silent=True) or {}
+        nickname = (payload.get("nickname", "") or "").strip()
         try:
-            phone_e164 = parse_phone(payload.get("phone", ""))
+            code = parse_login_code(payload.get("code", ""))
         except ValueError as exc:
             return json_error(str(exc), 400)
 
-        code = str(payload.get("code", "")).strip()
-        if len(code) != 6 or not code.isdigit():
-            return json_error("Введите 6-значный код.", 400)
+        if len(nickname) < 3:
+            return json_error("Укажи никнейм.", 400)
 
-        if verify_rate_limited(phone_e164):
-            return json_error("Слишком много попыток. Попробуйте позже.", 429)
-
-        auth_code = latest_active_code(phone_e164)
-        if not auth_code:
-            return json_error("Код не найден или истёк.", 400)
-        if auth_code.attempts >= flask_app.config["AUTH_CODE_MAX_ATTEMPTS"]:
-            return json_error("Лимит попыток исчерпан. Запросите новый код.", 429)
-
-        is_valid = False
-        if auth_code.provider == "twilio_verify":
-            is_valid = check_twilio_verification(phone_e164, code)
-        else:
-            expected = hash_secret(f"{phone_e164}:{code}")
-            is_valid = bool(auth_code.code_hash and hmac.compare_digest(auth_code.code_hash, expected))
-
-        if not is_valid:
-            auth_code.attempts += 1
-            db.session.commit()
+        user = User.query.filter(func.lower(User.nickname) == nickname.lower()).first()
+        if not user:
+            return json_error("Аккаунт не найден.", 404)
+        if not user.login_code_hash:
+            return json_error("Для этого аккаунта ещё не задан код входа. Войди в старую сессию и задай код в настройках.", 409)
+        if not verify_login_code(user, code):
             return json_error("Неверный код.", 400)
 
-        auth_code.consumed_at = utcnow()
-        user = create_or_get_user_by_phone(phone_e164)
-        db.session.commit()
         return create_session_response(user)
+
+    @flask_app.post("/api/auth/set-login-code")
+    @login_required
+    def api_auth_set_login_code():
+        payload = request.get_json(silent=True) or {}
+        try:
+            code = parse_login_code(payload.get("code", ""))
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        set_login_code(g.current_user, code)
+        db.session.commit()
+        return jsonify({"ok": True})
 
     @flask_app.post("/api/auth/logout")
     @login_required
@@ -696,12 +709,10 @@ def register_routes(flask_app: Flask):
     @login_required
     def api_profile_update():
         payload = request.get_json(silent=True) or {}
-        nickname = (payload.get("nickname", "") or "").strip()
-        if not nickname or len(nickname) < 3 or len(nickname) > 32:
-            return json_error("Никнейм должен быть длиной от 3 до 32 символов.", 400)
-
-        if not all(ch.isalnum() or ch in "._-" for ch in nickname):
-            return json_error("Никнейм может содержать буквы, цифры, точку, дефис и подчёркивание.", 400)
+        try:
+            nickname = normalize_nickname(payload.get("nickname", ""))
+        except ValueError as exc:
+            return json_error(str(exc), 400)
 
         existing = User.query.filter(User.nickname == nickname, User.id != g.current_user.id).first()
         if existing:
@@ -991,6 +1002,14 @@ def register_routes(flask_app: Flask):
         )
 
 
+
+
+def ensure_user_schema_upgrades():
+    columns = {row[1] for row in db.session.execute(text("PRAGMA table_info(users)"))}
+    if "login_code_hash" not in columns:
+        db.session.execute(text("ALTER TABLE users ADD COLUMN login_code_hash VARCHAR(64)"))
+        db.session.commit()
+
 def create_app():
     flask_app = Flask(__name__, static_folder="static", template_folder="templates")
     flask_app.config.from_object(Config)
@@ -1000,6 +1019,7 @@ def create_app():
 
     with flask_app.app_context():
         db.create_all()
+        ensure_user_schema_upgrades()
 
     return flask_app
 
