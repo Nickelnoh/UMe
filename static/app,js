@@ -8,7 +8,6 @@ const state = {
   currentChat: null,
   pendingAttachments: [],
   pendingByTempId: new Map(),
-  activeMediaMessageId: null,
   socket: null,
   poller: null,
   searchTimer: null,
@@ -31,16 +30,19 @@ const els = {
   authScreen: document.getElementById("auth-screen"),
   profileScreen: document.getElementById("profile-screen"),
   messengerScreen: document.getElementById("messenger-screen"),
-  sendCodeForm: document.getElementById("send-code-form"),
-  verifyCodeForm: document.getElementById("verify-code-form"),
+  authModeGroup: document.getElementById("auth-mode-group"),
+  loginForm: document.getElementById("login-form"),
+  registerForm: document.getElementById("register-form"),
   profileForm: document.getElementById("profile-form"),
-  phoneInput: document.getElementById("phone-input"),
-  codeInput: document.getElementById("code-input"),
+  loginNicknameInput: document.getElementById("login-nickname-input"),
+  loginCodeInput: document.getElementById("login-code-input"),
+  registerNicknameInput: document.getElementById("register-nickname-input"),
+  registerCodeInput: document.getElementById("register-code-input"),
+  registerCodeConfirmInput: document.getElementById("register-code-confirm-input"),
   nicknameInput: document.getElementById("nickname-input"),
   avatarInput: document.getElementById("avatar-input"),
   authStatus: document.getElementById("auth-status"),
   profileStatus: document.getElementById("profile-status"),
-  stubWarning: document.getElementById("stub-warning"),
   meAvatar: document.getElementById("me-avatar"),
   meName: document.getElementById("me-name"),
   meNickname: document.getElementById("me-nickname"),
@@ -57,10 +59,8 @@ const els = {
   closeSettingsBtn: document.getElementById("close-settings-btn"),
   settingsDrawer: document.getElementById("settings-drawer"),
   notificationToggle: document.getElementById("notification-toggle"),
-  settingsNicknameInput: document.getElementById("settings-nickname-input"),
-  settingsAvatarInput: document.getElementById("settings-avatar-input"),
-  saveSettingsProfileBtn: document.getElementById("save-settings-profile-btn"),
-  settingsProfileStatus: document.getElementById("settings-profile-status"),
+  settingsLoginCodeInput: document.getElementById("settings-login-code-input"),
+  saveLoginCodeBtn: document.getElementById("save-login-code-btn"),
   chatAvatar: document.getElementById("chat-avatar"),
   chatTitle: document.getElementById("chat-title"),
   chatMeta: document.getElementById("chat-meta"),
@@ -151,45 +151,6 @@ function formatDuration(totalSeconds) {
   const minutes = Math.floor(safe / 60);
   const seconds = safe % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function getAttachmentSignature(attachment) {
-  return [attachment?.id || "", attachment?.kind || "", attachment?.original_name || ""].join(":");
-}
-
-function getMessageClientSignature(message) {
-  return JSON.stringify({
-    text: message?.text || "",
-    message_type: message?.message_type || "text",
-    sender_user_id: message?.sender_user_id || "",
-    attachments: (message?.attachments || []).map(getAttachmentSignature).sort(),
-  });
-}
-
-function dedupeMessages(messages) {
-  const unique = new Map();
-  for (const message of messages || []) {
-    if (message?.id) {
-      unique.set(message.id, message);
-    }
-  }
-  return Array.from(unique.values());
-}
-
-function hasActiveMediaPlayback() {
-  return Array.from(document.querySelectorAll("audio, video")).some((media) => !media.paused && !media.ended);
-}
-
-function pickVoiceMimeType() {
-  if (!window.MediaRecorder) return "";
-  const preferred = [
-    "audio/mp4",
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/ogg;codecs=opus",
-    "audio/ogg",
-  ];
-  return preferred.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
 function setStatus(element, message, isError = false) {
@@ -287,10 +248,6 @@ function loadAppearance() {
 }
 
 function openDrawer() {
-  if (state.me && els.settingsNicknameInput) {
-    els.settingsNicknameInput.value = state.me.nickname || "";
-  }
-  setStatus(els.settingsProfileStatus, "");
   els.settingsDrawer.classList.remove("hidden");
 }
 
@@ -325,12 +282,6 @@ function renderMe() {
   els.meName.textContent = state.me.nickname || "UMe";
   els.meNickname.textContent = state.me.nickname ? `@${state.me.nickname}` : "Заполни никнейм";
   renderAvatar(els.meAvatar, state.me.avatar_url, "U");
-  if (els.settingsNicknameInput) {
-    els.settingsNicknameInput.value = state.me.nickname || "";
-  }
-  if (els.settingsAvatarInput) {
-    els.settingsAvatarInput.value = "";
-  }
   if (state.me.settings?.theme) {
     state.appearance.theme = state.me.settings.theme;
     persistAppearance();
@@ -339,9 +290,7 @@ function renderMe() {
 }
 
 function messageSignature(messages) {
-  return dedupeMessages(messages)
-    .map((item) => `${item.id}:${item.status}:${(item.attachments || []).map((attachment) => attachment.id).join(",")}`)
-    .join("|");
+  return messages.map((item) => `${item.id}:${item.status}`).join("|");
 }
 
 function upsertChat(chat) {
@@ -618,23 +567,21 @@ function patchCurrentChatMeta(chat) {
 }
 
 function renderMessages(messages, force = false) {
-  const normalizedMessages = dedupeMessages(messages);
   const currentSignature = els.messages.dataset.signature || "";
-  const nextSignature = messageSignature(normalizedMessages);
+  const nextSignature = messageSignature(messages);
   if (!force && currentSignature === nextSignature) return;
-  if (!force && hasActiveMediaPlayback()) return;
 
   els.messages.dataset.signature = nextSignature;
   els.messages.innerHTML = "";
 
-  if (!normalizedMessages.length) {
+  if (!messages.length) {
     els.messages.classList.add("empty");
     els.messages.innerHTML = `<div class="empty-state">Здесь пока пусто. Напиши первое сообщение.</div>`;
     return;
   }
 
   els.messages.classList.remove("empty");
-  normalizedMessages.forEach((message) => els.messages.appendChild(createMessageElement(message)));
+  messages.forEach((message) => els.messages.appendChild(createMessageElement(message)));
   requestAnimationFrame(() => {
     els.messages.scrollTop = els.messages.scrollHeight;
   });
@@ -643,7 +590,7 @@ function renderMessages(messages, force = false) {
 function appendMessage(message) {
   const current = ensureCurrentMessages();
   if (current.some((item) => item.id === message.id)) return;
-  const next = dedupeMessages([...current, message]);
+  const next = [...current, message];
   state.messagesByChat.set(state.currentChatId, next);
   if (state.currentChatId === message.chat_id) {
     els.messages.classList.remove("empty");
@@ -654,41 +601,9 @@ function appendMessage(message) {
   }
 }
 
-function reconcileIncomingMessage(existingMessages, incomingMessage) {
-  const incomingSignature = getMessageClientSignature(incomingMessage);
-  let replaced = false;
-
-  const next = existingMessages
-    .map((item) => {
-      if (item.id === incomingMessage.id) {
-        replaced = true;
-        return incomingMessage;
-      }
-      if (
-        item.temp &&
-        item.is_mine &&
-        !replaced &&
-        getMessageClientSignature(item) === incomingSignature
-      ) {
-        replaced = true;
-        return incomingMessage;
-      }
-      return item;
-    });
-
-  if (!replaced) {
-    next.push(incomingMessage);
-  }
-
-  return dedupeMessages(next);
-}
-
 function replaceTempMessage(tempId, realMessage) {
   const current = ensureCurrentMessages();
-  const next = reconcileIncomingMessage(
-    current.map((item) => (item.id === tempId ? { ...item, id: realMessage.id } : item)),
-    realMessage,
-  );
+  const next = current.map((item) => item.id === tempId ? realMessage : item);
   state.messagesByChat.set(state.currentChatId, next);
   renderMessages(next, true);
 }
@@ -732,9 +647,8 @@ async function openChat(chatId) {
   if (cached) renderMessages(cached);
 
   const data = await api(`/api/chats/${chatId}/messages`);
-  const normalized = dedupeMessages(data.messages || []);
-  state.messagesByChat.set(chatId, normalized);
-  renderMessages(normalized);
+  state.messagesByChat.set(chatId, data.messages || []);
+  renderMessages(data.messages || []);
   await markCurrentChatRead();
 }
 
@@ -749,31 +663,26 @@ async function uploadSelectedFiles(fileList, purpose = "message") {
   return Promise.all(uploads);
 }
 
-async function handleAuthSendCode(event) {
-  event.preventDefault();
-  setStatus(els.authStatus, "Отправляем код...");
-  state.phone = els.phoneInput.value.trim();
-  try {
-    const data = await api("/api/auth/send-code", {
-      method: "POST",
-      body: { phone: state.phone },
-    });
-    setStatus(els.authStatus, `Код отправлен. Действителен ${Math.round((data.ttl_seconds || 300) / 60)} мин.`);
-    els.verifyCodeForm.classList.remove("hidden");
-    els.codeInput.focus();
-    els.stubWarning.classList.toggle("hidden", !data.sms_stub);
-  } catch (error) {
-    setStatus(els.authStatus, error.message, true);
-  }
+function switchAuthMode(mode) {
+  const isLogin = mode !== "register";
+  els.loginForm?.classList.toggle("hidden", !isLogin);
+  els.registerForm?.classList.toggle("hidden", isLogin);
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.authMode === mode);
+  });
+  setStatus(els.authStatus, "");
 }
 
-async function handleAuthVerifyCode(event) {
+async function handleAuthLogin(event) {
   event.preventDefault();
-  setStatus(els.authStatus, "Проверяем код...");
+  setStatus(els.authStatus, "Входим в UMe...");
   try {
-    const data = await api("/api/auth/verify-code", {
+    const data = await api("/api/auth/login", {
       method: "POST",
-      body: { phone: state.phone, code: els.codeInput.value.trim() },
+      body: {
+        nickname: els.loginNicknameInput.value.trim(),
+        code: els.loginCodeInput.value.trim(),
+      },
     });
     state.me = data.user;
     renderMe();
@@ -784,6 +693,47 @@ async function handleAuthVerifyCode(event) {
     }
   } catch (error) {
     setStatus(els.authStatus, error.message, true);
+  }
+}
+
+async function handleAuthRegister(event) {
+  event.preventDefault();
+  const code = els.registerCodeInput.value.trim();
+  const confirm = els.registerCodeConfirmInput.value.trim();
+  if (code !== confirm) {
+    setStatus(els.authStatus, "Коды не совпадают.", true);
+    return;
+  }
+  setStatus(els.authStatus, "Создаём аккаунт...");
+  try {
+    const data = await api("/api/auth/register", {
+      method: "POST",
+      body: {
+        nickname: els.registerNicknameInput.value.trim(),
+        code,
+      },
+    });
+    state.me = data.user;
+    renderMe();
+    await bootMessenger();
+  } catch (error) {
+    setStatus(els.authStatus, error.message, true);
+  }
+}
+
+async function handleSaveLoginCode() {
+  const code = (els.settingsLoginCodeInput?.value || "").trim();
+  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+    showToast("Код входа", "Укажи 6 цифр.");
+    return;
+  }
+  try {
+    await api("/api/auth/set-login-code", { method: "POST", body: { code } });
+    if (state.me) state.me.has_login_code = true;
+    if (els.settingsLoginCodeInput) els.settingsLoginCodeInput.value = "";
+    showToast("Код входа", "Новый код сохранён.");
+  } catch (error) {
+    showToast("Код входа", error.message);
   }
 }
 
@@ -809,39 +759,6 @@ async function handleProfileSave(event) {
     await bootMessenger();
   } catch (error) {
     setStatus(els.profileStatus, error.message, true);
-  }
-}
-
-async function handleSettingsProfileSave() {
-  if (!state.me) return;
-  setStatus(els.settingsProfileStatus, "Сохраняем профиль...");
-  try {
-    const nickname = (els.settingsNicknameInput?.value || "").trim();
-    let avatarAttachmentId = null;
-    const avatarFile = els.settingsAvatarInput?.files?.[0];
-    if (avatarFile) {
-      const uploads = await uploadSelectedFiles([avatarFile], "avatar");
-      avatarAttachmentId = uploads[0]?.id || null;
-    }
-
-    const data = await api("/api/profile/update", {
-      method: "POST",
-      body: {
-        nickname,
-        avatar_attachment_id: avatarAttachmentId,
-      },
-    });
-
-    state.me = {
-      ...state.me,
-      ...data.user,
-    };
-    renderMe();
-    filterChats();
-    setStatus(els.settingsProfileStatus, "Профиль обновлён.");
-    showToast("Профиль обновлён", "Изменения сохранены в UMe.");
-  } catch (error) {
-    setStatus(els.settingsProfileStatus, error.message, true);
   }
 }
 
@@ -922,9 +839,7 @@ async function handleMessageSend(event) {
     sender_user_id: state.me.id,
     sender_nickname: state.me.nickname,
     text,
-    message_type: attachmentIds.length && !text
-      ? (state.pendingAttachments[0]?.original_name?.startsWith("voice-") ? "voice" : (state.pendingAttachments[0]?.kind || "file"))
-      : "text",
+    message_type: attachmentIds.length && !text ? (state.pendingAttachments[0]?.kind || "file") : "text",
     created_at: new Date().toISOString(),
     attachments: state.pendingAttachments.map((item) => ({ ...item })),
     status: "sending",
@@ -936,7 +851,7 @@ async function handleMessageSend(event) {
   upsertChat({
     ...state.currentChat,
     id: state.currentChatId,
-    last_message_preview: text || ((tempMessage.message_type === "audio" || tempMessage.message_type === "voice") ? "🎙 Голосовое" : "📎 Вложение"),
+    last_message_preview: text || (tempMessage.message_type === "audio" ? "🎙 Голосовое" : "📎 Вложение"),
     last_message_at: tempMessage.created_at,
     updated_at: tempMessage.created_at,
   });
@@ -1042,15 +957,14 @@ function attachSocket() {
     filterChats();
 
     const existing = state.messagesByChat.get(message.chat_id) || [];
-    const next = reconcileIncomingMessage(existing, message);
-    state.messagesByChat.set(message.chat_id, next);
+    if (!existing.some((item) => item.id === message.id)) {
+      state.messagesByChat.set(message.chat_id, [...existing, message]);
+    }
 
     if (message.chat_id === state.currentChatId) {
       state.currentChat = chat;
       patchCurrentChatMeta(chat);
-      if (!hasActiveMediaPlayback()) {
-        renderMessages(next);
-      }
+      renderMessages(state.messagesByChat.get(message.chat_id) || []);
       markCurrentChatRead();
     } else {
       maybeNotify(message, chat);
@@ -1065,9 +979,9 @@ function attachSocket() {
   });
 
   state.socket.on("chat:read", ({ chat_id }) => {
-    if (chat_id === state.currentChatId && !hasActiveMediaPlayback()) {
+    if (chat_id === state.currentChatId) {
       const current = ensureCurrentMessages();
-      renderMessages(current);
+      renderMessages(current, true);
     }
   });
 }
@@ -1079,14 +993,11 @@ function attachPolling() {
     try {
       await loadChats({ preserveSelection: true });
       if (state.currentChatId) {
-        if (!hasActiveMediaPlayback()) {
-          const data = await api(`/api/chats/${state.currentChatId}/messages`);
-          const current = ensureCurrentMessages();
-          const normalized = dedupeMessages(data.messages || []);
-          if (messageSignature(current) !== messageSignature(normalized)) {
-            state.messagesByChat.set(state.currentChatId, normalized);
-            renderMessages(normalized);
-          }
+        const data = await api(`/api/chats/${state.currentChatId}/messages`);
+        const current = ensureCurrentMessages();
+        if (messageSignature(current) !== messageSignature(data.messages || [])) {
+          state.messagesByChat.set(state.currentChatId, data.messages || []);
+          renderMessages(data.messages || []);
         }
       }
     } catch (error) {
@@ -1138,8 +1049,8 @@ async function startVoiceRecording() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = pickVoiceMimeType();
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     state.recording = {
       active: true,
       mediaRecorder: recorder,
@@ -1161,11 +1072,8 @@ async function startVoiceRecording() {
 
       if (!blob.size) return;
 
-      const recorderType = recorder.mimeType || "audio/webm";
-      let extension = "webm";
-      if (recorderType.includes("ogg")) extension = "ogg";
-      if (recorderType.includes("mp4") || recorderType.includes("m4a")) extension = "m4a";
-      const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: recorderType });
+      const extension = (recorder.mimeType || "audio/webm").includes("ogg") ? "ogg" : "webm";
+      const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: recorder.mimeType || "audio/webm" });
       try {
         const [attachment] = await uploadSelectedFiles([file], "message");
         const hadPending = state.pendingAttachments.length > 0 || Boolean(els.messageInput.value.trim());
@@ -1206,9 +1114,14 @@ async function bootMessenger() {
 }
 
 function bindEvents() {
-  els.sendCodeForm.addEventListener("submit", handleAuthSendCode);
-  els.verifyCodeForm.addEventListener("submit", handleAuthVerifyCode);
+  els.loginForm.addEventListener("submit", handleAuthLogin);
+  els.registerForm.addEventListener("submit", handleAuthRegister);
   els.profileForm.addEventListener("submit", handleProfileSave);
+  els.authModeGroup?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-auth-mode]");
+    if (!button) return;
+    switchAuthMode(button.dataset.authMode);
+  });
   els.fileInput.addEventListener("change", handleFilesSelected);
   els.messageForm.addEventListener("submit", handleMessageSend);
   els.messageInput.addEventListener("input", autoResizeComposer);
@@ -1251,7 +1164,7 @@ function bindEvents() {
     applyAppearance();
   });
   els.notificationToggle.addEventListener("change", (event) => toggleNotifications(event.target.checked));
-  els.saveSettingsProfileBtn?.addEventListener("click", handleSettingsProfileSave);
+  els.saveLoginCodeBtn?.addEventListener("click", handleSaveLoginCode);
 
   els.userSearchInput.addEventListener("input", () => {
     window.clearTimeout(state.userSearchTimer);
