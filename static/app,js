@@ -1,1207 +1,1028 @@
-const state = {
-  me: null,
-  phone: "",
-  chats: [],
-  filteredChats: [],
-  messagesByChat: new Map(),
-  currentChatId: null,
-  currentChat: null,
-  pendingAttachments: [],
-  pendingByTempId: new Map(),
-  socket: null,
-  poller: null,
-  searchTimer: null,
-  userSearchTimer: null,
-  notificationsEnabled: false,
-  appearance: {
-    theme: "dark",
-    accent: "#4ea1ff",
-    chatBackground: "aurora",
-  },
-  recording: {
-    active: false,
-    mediaRecorder: null,
-    chunks: [],
-    stream: null,
-  },
-};
-
-const els = {
-  authScreen: document.getElementById("auth-screen"),
-  profileScreen: document.getElementById("profile-screen"),
-  messengerScreen: document.getElementById("messenger-screen"),
-  authModeGroup: document.getElementById("auth-mode-group"),
-  loginForm: document.getElementById("login-form"),
-  registerForm: document.getElementById("register-form"),
-  profileForm: document.getElementById("profile-form"),
-  loginNicknameInput: document.getElementById("login-nickname-input"),
-  loginCodeInput: document.getElementById("login-code-input"),
-  registerNicknameInput: document.getElementById("register-nickname-input"),
-  registerCodeInput: document.getElementById("register-code-input"),
-  registerCodeConfirmInput: document.getElementById("register-code-confirm-input"),
-  nicknameInput: document.getElementById("nickname-input"),
-  avatarInput: document.getElementById("avatar-input"),
-  authStatus: document.getElementById("auth-status"),
-  profileStatus: document.getElementById("profile-status"),
-  meAvatar: document.getElementById("me-avatar"),
-  meName: document.getElementById("me-name"),
-  meNickname: document.getElementById("me-nickname"),
-  chatSearchInput: document.getElementById("chat-search-input"),
-  chatList: document.getElementById("chat-list"),
-  chatItemTemplate: document.getElementById("chat-item-template"),
-  pendingFileTemplate: document.getElementById("pending-file-template"),
-  newChatBtn: document.getElementById("new-chat-btn"),
-  newChatModal: document.getElementById("new-chat-modal"),
-  closeNewChatBtn: document.getElementById("close-new-chat-btn"),
-  userSearchInput: document.getElementById("user-search-input"),
-  userSearchResults: document.getElementById("user-search-results"),
-  openSettingsBtn: document.getElementById("open-settings-btn"),
-  closeSettingsBtn: document.getElementById("close-settings-btn"),
-  settingsDrawer: document.getElementById("settings-drawer"),
-  notificationToggle: document.getElementById("notification-toggle"),
-  settingsLoginCodeInput: document.getElementById("settings-login-code-input"),
-  saveLoginCodeBtn: document.getElementById("save-login-code-btn"),
-  chatAvatar: document.getElementById("chat-avatar"),
-  chatTitle: document.getElementById("chat-title"),
-  chatMeta: document.getElementById("chat-meta"),
-  pinChatBtn: document.getElementById("pin-chat-btn"),
-  hideChatBtn: document.getElementById("hide-chat-btn"),
-  mobileBackBtn: document.getElementById("mobile-back-btn"),
-  messages: document.getElementById("messages"),
-  messageForm: document.getElementById("message-form"),
-  messageInput: document.getElementById("message-input"),
-  fileInput: document.getElementById("file-input"),
-  pendingFiles: document.getElementById("pending-files"),
-  sendBtn: document.getElementById("send-btn"),
-  voiceBtn: document.getElementById("voice-btn"),
-  recordingIndicator: document.getElementById("recording-indicator"),
-  logoutBtn: document.getElementById("logout-btn"),
-  themeChipGroup: document.getElementById("theme-chip-group"),
-  bgChipGroup: document.getElementById("bg-chip-group"),
-  accentSwatches: document.getElementById("accent-swatches"),
-  toastStack: document.getElementById("toast-stack"),
-};
-
-function getCookie(name) {
-  const parts = document.cookie.split(";").map((item) => item.trim());
-  const match = parts.find((item) => item.startsWith(`${name}=`));
-  return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
+:root {
+  --accent: #4ea1ff;
+  --accent-strong: color-mix(in srgb, var(--accent) 82%, white 18%);
+  --accent-soft: color-mix(in srgb, var(--accent) 20%, transparent);
+  --bg: #0b1220;
+  --bg-2: #0f1728;
+  --panel: rgba(18, 27, 43, 0.88);
+  --panel-solid: #121b2b;
+  --panel-soft: rgba(24, 36, 58, 0.74);
+  --panel-2: #1a2740;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #edf3ff;
+  --muted: #8ea1bd;
+  --success: #35c58b;
+  --danger: #ff6b7d;
+  --warning: #ffb84d;
+  --message-me: color-mix(in srgb, var(--accent) 34%, #18324d 66%);
+  --message-peer: rgba(255, 255, 255, 0.05);
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+  --radius-xl: 24px;
+  --radius-lg: 20px;
+  --radius-md: 16px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-async function api(path, options = {}) {
-  const method = options.method || "GET";
-  const headers = new Headers(options.headers || {});
-  const requestInit = {
-    method,
-    credentials: "same-origin",
-    headers,
-  };
-
-  if (method !== "GET" && method !== "HEAD" && !(options.body instanceof FormData)) {
-    headers.set("Content-Type", "application/json");
-    const csrf = getCookie("csrf_token");
-    if (csrf) headers.set("X-CSRF-Token", csrf);
-    requestInit.body = JSON.stringify(options.body || {});
-  } else if (options.body instanceof FormData) {
-    const csrf = getCookie("csrf_token");
-    if (csrf) headers.set("X-CSRF-Token", csrf);
-    requestInit.body = options.body;
-  }
-
-  const response = await fetch(path, requestInit);
-  const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    const message = typeof payload === "object" && payload?.error ? payload.error : `HTTP ${response.status}`;
-    throw new Error(message);
-  }
-  return payload;
+html[data-theme="light"] {
+  --bg: #e8eef9;
+  --bg-2: #eff4ff;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-solid: #ffffff;
+  --panel-soft: rgba(250, 252, 255, 0.9);
+  --panel-2: #f4f7fd;
+  --line: rgba(17, 24, 39, 0.08);
+  --line-strong: rgba(17, 24, 39, 0.12);
+  --text: #142033;
+  --muted: #62748f;
+  --message-peer: #ffffff;
+  --message-me: color-mix(in srgb, var(--accent) 16%, white 84%);
+  --shadow: 0 18px 46px rgba(43, 75, 132, 0.12);
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+html[data-chat-bg="aurora"] body {
+  background:
+    radial-gradient(circle at 8% 12%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 28%),
+    radial-gradient(circle at 100% 88%, rgba(109, 177, 255, 0.17), transparent 24%),
+    linear-gradient(180deg, var(--bg), var(--bg-2));
 }
 
-function formatTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+html[data-chat-bg="paper"] body {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.02)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px),
+    linear-gradient(180deg, var(--bg), var(--bg-2));
 }
 
-function formatDateTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  return date.toLocaleString([], {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+html[data-chat-bg="midnight"] body {
+  background:
+    radial-gradient(circle at top center, rgba(255,255,255,0.04), transparent 20%),
+    linear-gradient(180deg, #08101c, #0b1322 42%, #0d1627 100%);
 }
 
-function formatDuration(totalSeconds) {
-  if (!Number.isFinite(totalSeconds)) return "0:00";
-  const safe = Math.max(0, Math.floor(totalSeconds));
-  const minutes = Math.floor(safe / 60);
-  const seconds = safe % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-function setStatus(element, message, isError = false) {
-  element.textContent = message || "";
-  element.classList.toggle("error", Boolean(isError));
+img, video {
+  max-width: 100%;
+  display: block;
 }
 
-function showToast(title, copy = "", duration = 3200) {
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.innerHTML = `
-    <div class="toast-title">${escapeHtml(title)}</div>
-    ${copy ? `<div class="toast-copy">${escapeHtml(copy)}</div>` : ""}
-  `;
-  els.toastStack.appendChild(toast);
-  window.setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateY(6px)";
-    window.setTimeout(() => toast.remove(), 220);
-  }, duration);
+button, input, textarea {
+  font: inherit;
 }
 
-function showScreen(name) {
-  els.authScreen.classList.toggle("hidden", name !== "auth");
-  els.profileScreen.classList.toggle("hidden", name !== "profile");
-  els.messengerScreen.classList.toggle("hidden", name !== "messenger");
+button {
+  border: none;
+  cursor: pointer;
 }
 
-function isMobileViewport() {
-  return window.matchMedia("(max-width: 820px)").matches;
+input, textarea {
+  width: 100%;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0.92rem 1rem;
+  outline: none;
 }
 
-function updateMobileLayout() {
-  document.body.classList.toggle("mobile-chat-open", isMobileViewport() && Boolean(state.currentChatId));
-  els.mobileBackBtn.classList.toggle("hidden", !isMobileViewport() || !state.currentChatId);
+textarea {
+  resize: none;
+  min-height: 52px;
+  max-height: 148px;
+  line-height: 1.45;
 }
 
-function applyTheme(theme) {
-  const finalTheme = theme === "system"
-    ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
-    : theme;
-  document.documentElement.setAttribute("data-theme", finalTheme);
+input::placeholder, textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 92%, transparent);
 }
 
-function updateAppearanceControls() {
-  document.querySelectorAll("[data-theme-choice]").forEach((node) => {
-    node.classList.toggle("active", node.dataset.themeChoice === state.appearance.theme);
-  });
-  document.querySelectorAll("[data-bg-choice]").forEach((node) => {
-    node.classList.toggle("active", node.dataset.bgChoice === state.appearance.chatBackground);
-  });
-  document.querySelectorAll("[data-accent]").forEach((node) => {
-    node.classList.toggle("active", node.dataset.accent === state.appearance.accent);
-  });
-  els.notificationToggle.checked = state.notificationsEnabled;
+input:focus, textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-function persistAppearance() {
-  window.localStorage.setItem("ume.appearance", JSON.stringify(state.appearance));
-  window.localStorage.setItem("ume.notifications", state.notificationsEnabled ? "1" : "0");
+.hidden { display: none !important; }
+.mobile-only { display: none !important; }
+.soft-scroll { scrollbar-width: thin; }
+.soft-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.soft-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--line-strong) 92%, transparent); border-radius: 999px; }
+
+.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: white;
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-function applyAppearance() {
-  applyTheme(state.appearance.theme);
-  document.documentElement.setAttribute("data-chat-bg", state.appearance.chatBackground);
-  document.documentElement.style.setProperty("--accent", state.appearance.accent);
-  updateAppearanceControls();
+.ghost {
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
 }
 
-async function saveTheme(theme) {
-  state.appearance.theme = theme;
-  persistAppearance();
-  applyAppearance();
-  if (!state.me) return;
-  try {
-    await api("/api/settings/theme", { method: "POST", body: { theme } });
-    state.me.settings.theme = theme;
-  } catch (error) {
-    console.error(error);
-  }
+.large { min-height: 52px; }
+.pill-btn {
+  border-radius: 999px;
+  padding: 0.85rem 1.1rem;
 }
 
-function loadAppearance() {
-  try {
-    const saved = JSON.parse(window.localStorage.getItem("ume.appearance") || "{}");
-    state.appearance = {
-      ...state.appearance,
-      ...saved,
-    };
-  } catch (error) {
-    console.debug(error);
-  }
-  state.notificationsEnabled = window.localStorage.getItem("ume.notifications") === "1";
-  applyAppearance();
+.circle-btn,
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
 }
 
-function openDrawer() {
-  els.settingsDrawer.classList.remove("hidden");
+.circle-btn.primary {
+  border: none;
 }
 
-function closeDrawer() {
-  els.settingsDrawer.classList.add("hidden");
+.logo-badge,
+.auth-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
-function openNewChatModal() {
-  els.newChatModal.classList.remove("hidden");
-  els.userSearchInput.focus();
+.status-line {
+  min-height: 1.5rem;
+  color: var(--muted);
 }
 
-function closeNewChatModal() {
-  els.newChatModal.classList.add("hidden");
-  els.userSearchInput.value = "";
-  els.userSearchResults.innerHTML = "";
+.status-line.error { color: var(--danger); }
+.auth-note {
+  margin-top: 0.75rem;
+  color: var(--warning);
+  font-size: 0.93rem;
 }
 
-function renderAvatar(element, imageUrl = "", fallback = "✦") {
-  element.style.backgroundImage = imageUrl ? `url(${imageUrl})` : "";
-  if (imageUrl) {
-    element.classList.remove("avatar-placeholder");
-    element.dataset.fallback = "";
-  } else {
-    element.classList.add("avatar-placeholder");
-    element.style.setProperty("--avatar-fallback", `'${fallback}'`);
-  }
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-function renderMe() {
-  if (!state.me) return;
-  els.meName.textContent = state.me.nickname || "UMe";
-  els.meNickname.textContent = state.me.nickname ? `@${state.me.nickname}` : "Заполни никнейм";
-  renderAvatar(els.meAvatar, state.me.avatar_url, "U");
-  if (state.me.settings?.theme) {
-    state.appearance.theme = state.me.settings.theme;
-    persistAppearance();
-    applyAppearance();
-  }
+.screen-card,
+.panel {
+  backdrop-filter: blur(18px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
 }
 
-function messageSignature(messages) {
-  return messages.map((item) => `${item.id}:${item.status}`).join("|");
+.screen-card {
+  width: min(470px, calc(100vw - 28px));
+  border-radius: var(--radius-xl);
+  padding: 1.55rem;
 }
 
-function upsertChat(chat) {
-  const existingIndex = state.chats.findIndex((item) => item.id === chat.id);
-  if (existingIndex === -1) {
-    state.chats.unshift(chat);
-  } else {
-    state.chats.splice(existingIndex, 1, { ...state.chats[existingIndex], ...chat });
-  }
+.auth-screen h1,
+.auth-screen h2 {
+  margin: 0.65rem 0 0.35rem;
+  font-size: clamp(1.6rem, 4vw, 2.1rem);
 }
 
-function filterChats() {
-  const query = (els.chatSearchInput.value || "").trim().toLowerCase();
-  state.filteredChats = !query
-    ? [...state.chats]
-    : state.chats.filter((chat) => [chat.title, chat.last_message_preview].some((field) => String(field || "").toLowerCase().includes(query)));
-  renderChats();
+.auth-copy {
+  margin: 0 0 1.15rem;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
-function renderChats() {
-  els.chatList.innerHTML = "";
-  if (!state.filteredChats.length) {
-    els.chatList.innerHTML = `<div class="empty-state">Пока пусто. Создай новый диалог через поиск по никнейму.</div>`;
-    return;
-  }
-
-  state.filteredChats.forEach((chat) => {
-    const fragment = els.chatItemTemplate.content.cloneNode(true);
-    const button = fragment.querySelector(".chat-item");
-    const avatar = fragment.querySelector(".chat-item-avatar");
-    const title = fragment.querySelector(".chat-item-title");
-    const time = fragment.querySelector(".chat-item-time");
-    const preview = fragment.querySelector(".chat-item-preview");
-    const badges = fragment.querySelector(".chat-item-badges");
-
-    button.dataset.chatId = chat.id;
-    button.classList.toggle("active", chat.id === state.currentChatId);
-    title.textContent = chat.title || "Диалог";
-    time.textContent = formatTime(chat.last_message_at || chat.updated_at);
-    preview.textContent = chat.last_message_preview || "Сообщений пока нет";
-    renderAvatar(avatar, chat.avatar_url, (chat.title || "U").slice(0, 1));
-
-    if (chat.pinned) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = "📌";
-      badges.appendChild(badge);
-    }
-    if (chat.unread_count > 0) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = String(chat.unread_count);
-      badges.appendChild(badge);
-    }
-
-    button.addEventListener("click", () => openChat(chat.id));
-    els.chatList.appendChild(fragment);
-  });
+.auth-form label span {
+  display: block;
+  margin-bottom: 0.55rem;
+  font-size: 0.92rem;
+  color: var(--muted);
 }
 
-function renderPendingFiles() {
-  els.pendingFiles.innerHTML = "";
-  state.pendingAttachments.forEach((item) => {
-    const fragment = els.pendingFileTemplate.content.cloneNode(true);
-    fragment.querySelector(".pending-file-name").textContent = item.original_name;
-    fragment.querySelector(".pending-file-remove").addEventListener("click", () => {
-      state.pendingAttachments = state.pendingAttachments.filter((entry) => entry.id !== item.id);
-      renderPendingFiles();
-    });
-    els.pendingFiles.appendChild(fragment);
-  });
+.app-shell {
+  min-height: 100vh;
+  padding: calc(18px + var(--safe-top)) 18px calc(18px + var(--safe-bottom));
+  display: grid;
+  place-items: center;
 }
 
-function ensureCurrentMessages() {
-  if (!state.currentChatId) return [];
-  return state.messagesByChat.get(state.currentChatId) || [];
+.messenger {
+  width: min(1500px, 100%);
+  height: min(940px, calc(100vh - 36px - var(--safe-top) - var(--safe-bottom)));
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) 1fr;
+  gap: 16px;
 }
 
-function createMessageElement(message) {
-  const wrapper = document.createElement("article");
-  wrapper.className = `message ${message.is_mine ? "mine" : ""}`;
-  wrapper.dataset.messageId = message.id;
-
-  const bubble = document.createElement("div");
-  bubble.className = "message-bubble";
-
-  const head = document.createElement("div");
-  head.className = "message-head";
-  head.innerHTML = `
-    <span class="message-author">${escapeHtml(message.sender_nickname || "UMe")}</span>
-    <span class="message-time">${escapeHtml(formatDateTime(message.created_at))}</span>
-  `;
-  bubble.appendChild(head);
-
-  if (message.text) {
-    const body = document.createElement("div");
-    body.className = "message-text";
-    body.textContent = message.text;
-    bubble.appendChild(body);
-  }
-
-  if (message.attachments?.length) {
-    const media = document.createElement("div");
-    media.className = "message-media";
-    message.attachments.forEach((attachment) => media.appendChild(createMediaElement(attachment, message)));
-    bubble.appendChild(media);
-  }
-
-  const foot = document.createElement("div");
-  foot.className = "message-foot";
-  foot.innerHTML = `
-    <span class="message-status">${message.is_mine ? escapeHtml(statusLabel(message.status)) : ""}</span>
-    ${message.temp ? `<span class="message-time">Отправка…</span>` : ""}
-  `;
-  bubble.appendChild(foot);
-
-  wrapper.appendChild(bubble);
-  return wrapper;
+.sidebar,
+.chat-layout {
+  min-height: 0;
 }
 
-function createMediaElement(attachment, message) {
-  if (attachment.kind === "image") {
-    const box = document.createElement("div");
-    box.className = "message-image";
-    const img = document.createElement("img");
-    img.src = attachment.url;
-    img.alt = attachment.original_name || "image";
-    img.loading = "lazy";
-    img.decoding = "async";
-    box.appendChild(img);
-    return box;
-  }
-
-  if (attachment.kind === "video") {
-    const box = document.createElement("div");
-    box.className = "message-video";
-    const video = document.createElement("video");
-    video.src = attachment.url;
-    video.controls = true;
-    video.preload = "metadata";
-    video.playsInline = true;
-    box.appendChild(video);
-    return box;
-  }
-
-  if (attachment.kind === "audio") {
-    return createAudioCard(attachment, message.message_type === "voice");
-  }
-
-  const fileCard = document.createElement("div");
-  fileCard.className = "file-card";
-  fileCard.innerHTML = `
-    <div>
-      <div class="file-card-title">${escapeHtml(attachment.original_name)}</div>
-      <div class="file-card-meta">${escapeHtml(attachment.mime_type)} · ${Math.round((attachment.size_bytes || 0) / 1024)} KB</div>
-    </div>
-    <a href="${attachment.url}?download=1">Скачать</a>
-  `;
-  return fileCard;
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-function createAudioCard(attachment, isVoice = false) {
-  const card = document.createElement("div");
-  card.className = "audio-card";
-  const audio = document.createElement("audio");
-  audio.src = attachment.url;
-  audio.preload = "metadata";
-
-  const playButton = document.createElement("button");
-  playButton.className = "audio-play";
-  playButton.type = "button";
-  playButton.textContent = "▶";
-
-  const main = document.createElement("div");
-  main.className = "audio-main";
-  const title = document.createElement("div");
-  title.className = "audio-title";
-  title.textContent = isVoice ? "Голосовое сообщение" : attachment.original_name;
-  const range = document.createElement("input");
-  range.className = "audio-range";
-  range.type = "range";
-  range.min = "0";
-  range.max = "100";
-  range.value = "0";
-  main.appendChild(title);
-  main.appendChild(range);
-
-  const time = document.createElement("div");
-  time.className = "audio-time";
-  time.textContent = "0:00";
-
-  playButton.addEventListener("click", async () => {
-    if (!audio.paused) {
-      audio.pause();
-      return;
-    }
-    pauseOtherAudio(audio);
-    try {
-      await audio.play();
-    } catch (error) {
-      console.debug(error);
-    }
-  });
-
-  audio.addEventListener("play", () => {
-    playButton.textContent = "❚❚";
-  });
-  audio.addEventListener("pause", () => {
-    playButton.textContent = "▶";
-  });
-  audio.addEventListener("ended", () => {
-    playButton.textContent = "▶";
-    range.value = "0";
-  });
-  audio.addEventListener("loadedmetadata", () => {
-    time.textContent = `0:00 / ${formatDuration(audio.duration)}`;
-  });
-  audio.addEventListener("timeupdate", () => {
-    if (audio.duration) {
-      range.value = String((audio.currentTime / audio.duration) * 100);
-      time.textContent = `${formatDuration(audio.currentTime)} / ${formatDuration(audio.duration)}`;
-    }
-  });
-  range.addEventListener("input", () => {
-    if (audio.duration) {
-      audio.currentTime = (Number(range.value) / 100) * audio.duration;
-    }
-  });
-
-  card.appendChild(playButton);
-  card.appendChild(main);
-  card.appendChild(time);
-  card.appendChild(audio);
-  return card;
+.sidebar-header,
+.sidebar-profile,
+.sidebar-search,
+.chat-header,
+.messages,
+.composer,
+.drawer-panel,
+.modal-panel {
+  border-radius: var(--radius-lg);
 }
 
-function pauseOtherAudio(currentAudio) {
-  document.querySelectorAll("audio").forEach((audio) => {
-    if (audio !== currentAudio) audio.pause();
-  });
+.sidebar-header,
+.sidebar-profile,
+.sidebar-search,
+.chat-header,
+.composer {
+  padding: 14px;
 }
 
-function statusLabel(status) {
-  if (status === "read") return "Прочитано";
-  if (status === "delivered") return "Доставлено";
-  if (status === "sent") return "Отправлено";
-  if (status === "sending") return "Отправка";
-  if (status === "failed") return "Ошибка";
-  return "Получено";
+.sidebar-title {
+  margin-top: 0.6rem;
+  font-size: 1.32rem;
+  font-weight: 700;
 }
 
-function patchCurrentChatMeta(chat) {
-  state.currentChat = chat || state.currentChat;
-  const hasChat = Boolean(state.currentChat);
-  els.messageForm.classList.toggle("hidden", !hasChat);
-  els.pinChatBtn.classList.toggle("hidden", !hasChat);
-  els.hideChatBtn.classList.toggle("hidden", !hasChat);
-
-  if (!hasChat) {
-    els.chatTitle.textContent = "Выбери чат";
-    els.chatMeta.textContent = "Диалоги и сообщения появятся здесь.";
-    renderAvatar(els.chatAvatar, "", "U");
-    return;
-  }
-
-  els.chatTitle.textContent = state.currentChat.title || "Диалог";
-  const parts = [];
-  if (state.currentChat.pinned) parts.push("закреплён");
-  if (state.currentChat.unread_count) parts.push(`непрочитано: ${state.currentChat.unread_count}`);
-  parts.push(`обновлён: ${formatDateTime(state.currentChat.last_message_at || state.currentChat.updated_at)}`);
-  els.chatMeta.textContent = parts.join(" · ");
-  els.pinChatBtn.textContent = state.currentChat.pinned ? "Открепить" : "Закрепить";
-  renderAvatar(els.chatAvatar, state.currentChat.avatar_url, (state.currentChat.title || "U").slice(0, 1));
+.sidebar-profile.compact,
+.sidebar-search.compact {
+  background: var(--panel-soft);
 }
 
-function renderMessages(messages, force = false) {
-  const currentSignature = els.messages.dataset.signature || "";
-  const nextSignature = messageSignature(messages);
-  if (!force && currentSignature === nextSignature) return;
-
-  els.messages.dataset.signature = nextSignature;
-  els.messages.innerHTML = "";
-
-  if (!messages.length) {
-    els.messages.classList.add("empty");
-    els.messages.innerHTML = `<div class="empty-state">Здесь пока пусто. Напиши первое сообщение.</div>`;
-    return;
-  }
-
-  els.messages.classList.remove("empty");
-  messages.forEach((message) => els.messages.appendChild(createMessageElement(message)));
-  requestAnimationFrame(() => {
-    els.messages.scrollTop = els.messages.scrollHeight;
-  });
+.profile-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-function appendMessage(message) {
-  const current = ensureCurrentMessages();
-  if (current.some((item) => item.id === message.id)) return;
-  const next = [...current, message];
-  state.messagesByChat.set(state.currentChatId, next);
-  if (state.currentChatId === message.chat_id) {
-    els.messages.classList.remove("empty");
-    els.messages.appendChild(createMessageElement(message));
-    requestAnimationFrame(() => {
-      els.messages.scrollTop = els.messages.scrollHeight;
-    });
-  }
+.profile-name {
+  font-weight: 700;
 }
 
-function replaceTempMessage(tempId, realMessage) {
-  const current = ensureCurrentMessages();
-  const next = current.map((item) => item.id === tempId ? realMessage : item);
-  state.messagesByChat.set(state.currentChatId, next);
-  renderMessages(next, true);
+.profile-subtitle {
+  margin-top: 0.2rem;
+  color: var(--muted);
 }
 
-async function loadChats({ preserveSelection = true } = {}) {
-  const data = await api("/api/chats");
-  state.chats = data.chats || [];
-  state.filteredChats = [...state.chats];
-
-  if (preserveSelection && state.currentChatId) {
-    state.currentChat = state.chats.find((item) => item.id === state.currentChatId) || null;
-  }
-
-  filterChats();
-  patchCurrentChatMeta(state.currentChat);
+.sidebar-actions-row {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
 }
 
-async function markCurrentChatRead() {
-  if (!state.currentChatId) return;
-  try {
-    await api(`/api/chats/${state.currentChatId}/read`, { method: "POST", body: {} });
-    const chat = state.chats.find((item) => item.id === state.currentChatId);
-    if (chat) {
-      chat.unread_count = 0;
-      filterChats();
-      patchCurrentChatMeta(chat);
-    }
-  } catch (error) {
-    console.debug(error.message);
-  }
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 16px;
+  padding: 0 14px;
 }
 
-async function openChat(chatId) {
-  state.currentChatId = chatId;
-  state.currentChat = state.chats.find((item) => item.id === chatId) || null;
-  filterChats();
-  patchCurrentChatMeta(state.currentChat);
-  updateMobileLayout();
-
-  const cached = state.messagesByChat.get(chatId);
-  if (cached) renderMessages(cached);
-
-  const data = await api(`/api/chats/${chatId}/messages`);
-  state.messagesByChat.set(chatId, data.messages || []);
-  renderMessages(data.messages || []);
-  await markCurrentChatRead();
+.search-box input {
+  border: none;
+  background: transparent;
+  padding-left: 0;
+  box-shadow: none !important;
 }
 
-async function uploadSelectedFiles(fileList, purpose = "message") {
-  const uploads = fileList.map(async (file) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("purpose", purpose);
-    const data = await api("/api/attachments/upload", { method: "POST", body: formData });
-    return data.attachment;
-  });
-  return Promise.all(uploads);
+.search-icon {
+  color: var(--muted);
+  font-size: 1rem;
 }
 
-function switchAuthMode(mode) {
-  const isLogin = mode !== "register";
-  els.loginForm?.classList.toggle("hidden", !isLogin);
-  els.registerForm?.classList.toggle("hidden", isLogin);
-  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.authMode === mode);
-  });
-  setStatus(els.authStatus, "");
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
 }
 
-async function handleAuthLogin(event) {
-  event.preventDefault();
-  setStatus(els.authStatus, "Входим в UMe...");
-  try {
-    const data = await api("/api/auth/login", {
-      method: "POST",
-      body: {
-        nickname: els.loginNicknameInput.value.trim(),
-        code: els.loginCodeInput.value.trim(),
-      },
-    });
-    state.me = data.user;
-    renderMe();
-    if (data.needs_profile) {
-      showScreen("profile");
-    } else {
-      await bootMessenger();
-    }
-  } catch (error) {
-    setStatus(els.authStatus, error.message, true);
-  }
+.chat-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  padding: 12px;
+  border-radius: 18px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
 }
 
-async function handleAuthRegister(event) {
-  event.preventDefault();
-  const code = els.registerCodeInput.value.trim();
-  const confirm = els.registerCodeConfirmInput.value.trim();
-  if (code !== confirm) {
-    setStatus(els.authStatus, "Коды не совпадают.", true);
-    return;
-  }
-  setStatus(els.authStatus, "Создаём аккаунт...");
-  try {
-    const data = await api("/api/auth/register", {
-      method: "POST",
-      body: {
-        nickname: els.registerNicknameInput.value.trim(),
-        code,
-      },
-    });
-    state.me = data.user;
-    renderMe();
-    await bootMessenger();
-  } catch (error) {
-    setStatus(els.authStatus, error.message, true);
-  }
+.chat-item:hover,
+.chat-item.active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-async function handleSaveLoginCode() {
-  const code = (els.settingsLoginCodeInput?.value || "").trim();
-  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
-    showToast("Код входа", "Укажи 6 цифр.");
-    return;
-  }
-  try {
-    await api("/api/auth/set-login-code", { method: "POST", body: { code } });
-    if (state.me) state.me.has_login_code = true;
-    if (els.settingsLoginCodeInput) els.settingsLoginCodeInput.value = "";
-    showToast("Код входа", "Новый код сохранён.");
-  } catch (error) {
-    showToast("Код входа", error.message);
-  }
+.chat-item.active {
+  transform: translateY(-1px);
 }
 
-async function handleProfileSave(event) {
-  event.preventDefault();
-  setStatus(els.profileStatus, "Сохраняем профиль...");
-  try {
-    let avatarAttachmentId = null;
-    const avatarFile = els.avatarInput.files[0];
-    if (avatarFile) {
-      const uploads = await uploadSelectedFiles([avatarFile], "avatar");
-      avatarAttachmentId = uploads[0]?.id || null;
-    }
-    const data = await api("/api/profile/update", {
-      method: "POST",
-      body: {
-        nickname: els.nicknameInput.value.trim(),
-        avatar_attachment_id: avatarAttachmentId,
-      },
-    });
-    state.me = data.user;
-    renderMe();
-    await bootMessenger();
-  } catch (error) {
-    setStatus(els.profileStatus, error.message, true);
-  }
+.chat-item-body {
+  min-width: 0;
 }
 
-async function handleCreateDirectChat(nickname) {
-  try {
-    const data = await api("/api/chats/direct", {
-      method: "POST",
-      body: { nickname },
-    });
-    upsertChat(data.chat);
-    filterChats();
-    closeNewChatModal();
-    await openChat(data.chat.id);
-  } catch (error) {
-    showToast("Не удалось создать чат", error.message);
-  }
+.chat-item-top,
+.chat-item-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-function renderUserSearchResults(users) {
-  els.userSearchResults.innerHTML = "";
-  if (!users.length) {
-    els.userSearchResults.innerHTML = `<div class="empty-state">Ничего не найдено. Попробуй другой никнейм.</div>`;
-    return;
-  }
-
-  users.forEach((user) => {
-    const row = document.createElement("div");
-    row.className = "search-result";
-    const avatar = document.createElement("div");
-    avatar.className = "avatar avatar-lg avatar-placeholder";
-    renderAvatar(avatar, user.avatar_url, (user.nickname || "U").slice(0, 1));
-    row.appendChild(avatar);
-
-    const meta = document.createElement("div");
-    meta.className = "search-result-meta";
-    meta.innerHTML = `
-      <div class="search-result-title">${escapeHtml(user.nickname || "Без никнейма")}</div>
-      <div class="search-result-subtitle">Начать диалог в UMe</div>
-    `;
-    row.appendChild(meta);
-
-    const action = document.createElement("button");
-    action.className = "search-result-action primary";
-    action.type = "button";
-    action.textContent = "Открыть";
-    action.addEventListener("click", () => handleCreateDirectChat(user.nickname));
-    row.appendChild(action);
-
-    els.userSearchResults.appendChild(row);
-  });
+.chat-item-title,
+.chat-item-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-async function searchUsers(query) {
-  if (query.trim().length < 2) {
-    els.userSearchResults.innerHTML = "";
-    return;
-  }
-  try {
-    const data = await api(`/api/users/search?q=${encodeURIComponent(query.trim())}`);
-    renderUserSearchResults(data.users || []);
-  } catch (error) {
-    els.userSearchResults.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
-  }
+.chat-item-title {
+  font-weight: 700;
 }
 
-async function handleMessageSend(event) {
-  event.preventDefault();
-  if (!state.currentChatId) return;
-
-  const text = els.messageInput.value.trim();
-  const attachmentIds = state.pendingAttachments.map((item) => item.id);
-  if (!text && !attachmentIds.length) return;
-
-  const tempId = `temp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const tempMessage = {
-    id: tempId,
-    chat_id: state.currentChatId,
-    sender_user_id: state.me.id,
-    sender_nickname: state.me.nickname,
-    text,
-    message_type: attachmentIds.length && !text ? (state.pendingAttachments[0]?.kind || "file") : "text",
-    created_at: new Date().toISOString(),
-    attachments: state.pendingAttachments.map((item) => ({ ...item })),
-    status: "sending",
-    is_mine: true,
-    temp: true,
-  };
-
-  appendMessage(tempMessage);
-  upsertChat({
-    ...state.currentChat,
-    id: state.currentChatId,
-    last_message_preview: text || (tempMessage.message_type === "audio" ? "🎙 Голосовое" : "📎 Вложение"),
-    last_message_at: tempMessage.created_at,
-    updated_at: tempMessage.created_at,
-  });
-  filterChats();
-
-  els.messageInput.value = "";
-  autoResizeComposer();
-  const attachmentsToSend = [...state.pendingAttachments];
-  state.pendingAttachments = [];
-  renderPendingFiles();
-  els.fileInput.value = "";
-
-  try {
-    const data = await api(`/api/chats/${state.currentChatId}/messages`, {
-      method: "POST",
-      body: { text, attachment_ids: attachmentsToSend.map((item) => item.id) },
-    });
-    replaceTempMessage(tempId, data.message);
-    upsertChat(data.chat);
-    state.currentChat = data.chat;
-    patchCurrentChatMeta(data.chat);
-    filterChats();
-  } catch (error) {
-    const current = ensureCurrentMessages().map((item) => {
-      if (item.id === tempId) return { ...item, status: "failed", temp: false };
-      return item;
-    });
-    state.messagesByChat.set(state.currentChatId, current);
-    renderMessages(current, true);
-    showToast("Сообщение не отправлено", error.message);
-  }
+.chat-item-time,
+.chat-item-preview {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
-async function handleFilesSelected(event) {
-  const files = [...(event.target.files || [])];
-  if (!files.length) return;
-  try {
-    showToast("Загрузка файлов", "Подготавливаем вложения...");
-    const attachments = await uploadSelectedFiles(files, "message");
-    state.pendingAttachments = state.pendingAttachments.concat(attachments);
-    els.fileInput.value = "";
-    renderPendingFiles();
-  } catch (error) {
-    showToast("Ошибка загрузки", error.message);
+.chat-item-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.avatar {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+  background-size: cover;
+  background-position: center;
+  border-radius: 18px;
+  flex-shrink: 0;
+}
+
+.avatar-lg { width: 54px; height: 54px; }
+.chat-item-avatar { width: 54px; height: 54px; }
+.avatar-placeholder::before {
+  content: "✦";
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.chat-layout {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.chat-header-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chat-title {
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+
+.chat-meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin-top: 0.25rem;
+}
+
+.chat-header-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+
+.messages {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.messages.empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.empty-state {
+  text-align: center;
+  line-height: 1.6;
+}
+
+.message {
+  max-width: min(72%, 760px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.message.mine {
+  align-self: flex-end;
+}
+
+.message-bubble {
+  padding: 14px 16px;
+  border-radius: 22px;
+  background: var(--message-peer);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.message.mine .message-bubble {
+  background: var(--message-me);
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.message-head,
+.message-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.message-head {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.message-author {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--text) 80%, var(--muted));
+}
+
+.message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.message-time,
+.message-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.message-media {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.message-image {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,0.12);
+}
+
+.message-image img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+}
+
+.message-video {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,0.16);
+}
+
+.message-video video {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: #000;
+}
+
+.file-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+}
+
+.file-card-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.file-card-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.file-card a {
+  color: var(--accent-strong);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.audio-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+}
+
+.audio-play {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: white;
+}
+
+.audio-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audio-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.audio-range {
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line-strong) 90%, transparent);
+  outline: none;
+  padding: 0;
+}
+
+.audio-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.audio-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent-strong);
+}
+
+.audio-time {
+  color: var(--muted);
+  font-size: 0.82rem;
+  min-width: 64px;
+  text-align: right;
+}
+
+.composer {
+  display: grid;
+  gap: 10px;
+}
+
+.pending-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pending-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  border: 1px solid var(--line);
+  max-width: min(100%, 320px);
+}
+
+.pending-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-file-remove {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+}
+
+.composer-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.attach-btn input {
+  display: none;
+}
+
+.recording-indicator {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.drawer,
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.drawer-backdrop,
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 9, 16, 0.52);
+}
+
+.drawer-panel,
+.modal-panel {
+  position: absolute;
+  right: 18px;
+  top: calc(18px + var(--safe-top));
+  width: min(420px, calc(100vw - 24px));
+  padding: 18px;
+}
+
+.modal-panel {
+  left: 50%;
+  right: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 24px));
+}
+
+.drawer-head,
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.drawer-head h3,
+.modal-head h3 {
+  margin: 0.65rem 0 0;
+}
+
+.settings-group {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.settings-label {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.chips,
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.chip.active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+}
+
+.swatch.active {
+  border-color: white;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.swatch-blue { background: #4ea1ff; }
+.swatch-green { background: #3fd09c; }
+.swatch-purple { background: #8c7cff; }
+.swatch-pink { background: #ff6d9d; }
+.swatch-gold { background: #f0b24d; }
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.toggle-row input {
+  width: 20px;
+  height: 20px;
+}
+
+.search-box-large {
+  margin-bottom: 14px;
+}
+
+.search-results {
+  max-height: 360px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+
+.search-result-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.search-result-title {
+  font-weight: 700;
+}
+
+.search-result-subtitle {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 3px;
+}
+
+.search-result-action {
+  padding: 10px 12px;
+  border-radius: 999px;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 18px;
+  bottom: calc(18px + var(--safe-bottom));
+  display: grid;
+  gap: 10px;
+  z-index: 50;
+}
+
+.toast {
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 24px));
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.toast-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.toast-copy {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 1100px) {
+  .messenger {
+    grid-template-columns: 320px 1fr;
   }
 }
 
-async function handleLogout() {
-  try {
-    await api("/api/auth/logout", { method: "POST", body: {} });
-  } catch (error) {
-    console.debug(error.message);
-  }
-  window.location.reload();
-}
-
-async function togglePinCurrentChat() {
-  if (!state.currentChatId || !state.currentChat) return;
-  const pinned = !state.currentChat.pinned;
-  await api(`/api/chats/${state.currentChatId}/pin`, {
-    method: "POST",
-    body: { pinned },
-  });
-  state.currentChat.pinned = pinned;
-  upsertChat(state.currentChat);
-  filterChats();
-  patchCurrentChatMeta(state.currentChat);
-}
-
-async function hideCurrentChat() {
-  if (!state.currentChatId) return;
-  const hiddenChatId = state.currentChatId;
-  await api(`/api/chats/${hiddenChatId}/hide`, {
-    method: "POST",
-    body: { hidden: true },
-  });
-  state.chats = state.chats.filter((item) => item.id !== hiddenChatId);
-  state.messagesByChat.delete(hiddenChatId);
-  state.currentChatId = null;
-  state.currentChat = null;
-  els.messages.dataset.signature = "";
-  renderMessages([], true);
-  filterChats();
-  patchCurrentChatMeta(null);
-  updateMobileLayout();
-}
-
-function attachSocket() {
-  if (typeof window.io !== "function") return;
-  if (state.socket) {
-    state.socket.disconnect();
+@media (max-width: 820px) {
+  .app-shell {
+    padding: 0;
   }
 
-  state.socket = window.io({
-    transports: ["websocket", "polling"],
-    withCredentials: true,
-  });
+  .messenger {
+    width: 100%;
+    height: 100vh;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 
-  state.socket.on("message:new", (payload) => {
-    const { message, chat } = payload || {};
-    if (!message || !chat) return;
-    upsertChat(chat);
-    filterChats();
+  .sidebar,
+  .chat-layout {
+    height: 100vh;
+  }
 
-    const existing = state.messagesByChat.get(message.chat_id) || [];
-    if (!existing.some((item) => item.id === message.id)) {
-      state.messagesByChat.set(message.chat_id, [...existing, message]);
-    }
+  .sidebar {
+    padding: 14px 14px calc(14px + var(--safe-bottom));
+  }
 
-    if (message.chat_id === state.currentChatId) {
-      state.currentChat = chat;
-      patchCurrentChatMeta(chat);
-      renderMessages(state.messagesByChat.get(message.chat_id) || []);
-      markCurrentChatRead();
-    } else {
-      maybeNotify(message, chat);
-      showToast(chat.title || "Новое сообщение", message.text || "Вложение");
-    }
-  });
+  .chat-layout {
+    display: none;
+    padding: 14px 14px calc(14px + var(--safe-bottom));
+  }
 
-  state.socket.on("chat:new", ({ chat }) => {
-    if (!chat) return;
-    upsertChat(chat);
-    filterChats();
-  });
+  body.mobile-chat-open .sidebar {
+    display: none;
+  }
 
-  state.socket.on("chat:read", ({ chat_id }) => {
-    if (chat_id === state.currentChatId) {
-      const current = ensureCurrentMessages();
-      renderMessages(current, true);
-    }
-  });
-}
+  body.mobile-chat-open .chat-layout {
+    display: grid;
+  }
 
-function attachPolling() {
-  if (state.poller) window.clearInterval(state.poller);
-  state.poller = window.setInterval(async () => {
-    if (!state.me || (state.socket && state.socket.connected)) return;
-    try {
-      await loadChats({ preserveSelection: true });
-      if (state.currentChatId) {
-        const data = await api(`/api/chats/${state.currentChatId}/messages`);
-        const current = ensureCurrentMessages();
-        if (messageSignature(current) !== messageSignature(data.messages || [])) {
-          state.messagesByChat.set(state.currentChatId, data.messages || []);
-          renderMessages(data.messages || []);
-        }
-      }
-    } catch (error) {
-      console.debug(error.message);
-    }
-  }, 8000);
-}
+  .mobile-only {
+    display: inline-grid !important;
+  }
 
-function maybeNotify(message, chat) {
-  const isVisible = !document.hidden && message.chat_id === state.currentChatId;
-  if (isVisible || !state.notificationsEnabled) return;
-  if (window.Notification && Notification.permission === "granted") {
-    const notification = new Notification(chat.title || "UMe", {
-      body: message.text || "Новое вложение",
-      icon: chat.avatar_url || undefined,
-      tag: `chat-${chat.id}`,
-    });
-    notification.onclick = () => {
-      window.focus();
-      openChat(chat.id);
-      notification.close();
-    };
+  .chat-header-actions {
+    gap: 6px;
+  }
+
+  .message {
+    max-width: 92%;
+  }
+
+  .composer-row {
+    grid-template-columns: auto auto 1fr auto;
+  }
+
+  .drawer-panel,
+  .modal-panel {
+    width: calc(100vw - 16px);
+    right: 8px;
+    left: 8px;
+    top: auto;
+    bottom: calc(8px + var(--safe-bottom));
+    transform: none;
+    max-height: min(88vh, 760px);
+    overflow: auto;
+  }
+
+  .modal-panel {
+    left: 8px;
+    top: auto;
+  }
+
+  .toast-stack {
+    right: 10px;
+    left: 10px;
+    bottom: calc(12px + var(--safe-bottom));
+  }
+
+  .toast {
+    min-width: 0;
+    max-width: none;
   }
 }
 
-async function toggleNotifications(enabled) {
-  if (enabled && window.Notification && Notification.permission === "default") {
-    const result = await Notification.requestPermission();
-    state.notificationsEnabled = result === "granted";
-  } else if (enabled && window.Notification && Notification.permission === "granted") {
-    state.notificationsEnabled = true;
-  } else {
-    state.notificationsEnabled = false;
-  }
-  persistAppearance();
-  updateAppearanceControls();
-}
-
-function autoResizeComposer() {
-  els.messageInput.style.height = "auto";
-  els.messageInput.style.height = `${Math.min(els.messageInput.scrollHeight, 148)}px`;
-}
-
-async function startVoiceRecording() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    showToast("Голосовые сообщения недоступны", "Твой браузер не поддерживает запись аудио.");
-    return;
+@media (max-width: 560px) {
+  .screen-card {
+    width: 100vw;
+    min-height: 100vh;
+    border-radius: 0;
+    padding: calc(22px + var(--safe-top)) 18px calc(22px + var(--safe-bottom));
   }
 
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    state.recording = {
-      active: true,
-      mediaRecorder: recorder,
-      chunks: [],
-      stream,
-    };
+  .sidebar-title {
+    font-size: 1.15rem;
+  }
 
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data && event.data.size > 0) state.recording.chunks.push(event.data);
-    });
-    recorder.addEventListener("stop", async () => {
-      const blob = new Blob(state.recording.chunks, { type: recorder.mimeType || "audio/webm" });
-      state.recording.stream?.getTracks().forEach((track) => track.stop());
-      state.recording = { active: false, mediaRecorder: null, chunks: [], stream: null };
-      els.recordingIndicator.classList.add("hidden");
-      els.voiceBtn.classList.remove("primary");
-      els.voiceBtn.classList.add("ghost");
-      els.voiceBtn.textContent = "🎙";
+  .sidebar-actions-row {
+    grid-template-columns: 1fr;
+  }
 
-      if (!blob.size) return;
+  .chat-header,
+  .composer,
+  .sidebar-header,
+  .sidebar-profile,
+  .sidebar-search,
+  .messages {
+    border-radius: 18px;
+  }
 
-      const extension = (recorder.mimeType || "audio/webm").includes("ogg") ? "ogg" : "webm";
-      const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: recorder.mimeType || "audio/webm" });
-      try {
-        const [attachment] = await uploadSelectedFiles([file], "message");
-        const hadPending = state.pendingAttachments.length > 0 || Boolean(els.messageInput.value.trim());
-        state.pendingAttachments.push(attachment);
-        renderPendingFiles();
-        showToast("Голосовое готово", "Запись загружена.");
-        if (!hadPending) {
-          await handleMessageSend(new Event("submit"));
-        }
-      } catch (error) {
-        showToast("Ошибка записи", error.message);
-      }
-    });
+  .chat-header {
+    padding: 12px;
+  }
 
-    recorder.start();
-    els.recordingIndicator.classList.remove("hidden");
-    els.voiceBtn.classList.remove("ghost");
-    els.voiceBtn.classList.add("primary");
-    els.voiceBtn.textContent = "■";
-  } catch (error) {
-    showToast("Нет доступа к микрофону", error.message || "Разреши доступ к микрофону.");
+  .chat-header-actions .ghost {
+    padding: 0.7rem 0.9rem;
+    font-size: 0.88rem;
+  }
+
+  .composer-row {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  #voice-btn {
+    order: 3;
+  }
+
+  #message-input {
+    order: 2;
+  }
+
+  #send-btn {
+    order: 4;
+  }
+
+  .message-image img,
+  .message-video video {
+    max-height: 260px;
   }
 }
 
-function stopVoiceRecording() {
-  if (state.recording.mediaRecorder && state.recording.active) {
-    state.recording.mediaRecorder.stop();
-  }
-}
-
-async function bootMessenger() {
-  showScreen("messenger");
-  renderMe();
-  await loadChats({ preserveSelection: false });
-  attachSocket();
-  attachPolling();
-  updateMobileLayout();
-}
-
-function bindEvents() {
-  els.loginForm.addEventListener("submit", handleAuthLogin);
-  els.registerForm.addEventListener("submit", handleAuthRegister);
-  els.profileForm.addEventListener("submit", handleProfileSave);
-  els.authModeGroup?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-auth-mode]");
-    if (!button) return;
-    switchAuthMode(button.dataset.authMode);
-  });
-  els.fileInput.addEventListener("change", handleFilesSelected);
-  els.messageForm.addEventListener("submit", handleMessageSend);
-  els.messageInput.addEventListener("input", autoResizeComposer);
-  els.logoutBtn.addEventListener("click", handleLogout);
-  els.pinChatBtn.addEventListener("click", togglePinCurrentChat);
-  els.hideChatBtn.addEventListener("click", hideCurrentChat);
-  els.mobileBackBtn.addEventListener("click", () => {
-    state.currentChatId = null;
-    state.currentChat = null;
-    patchCurrentChatMeta(null);
-    updateMobileLayout();
-    filterChats();
-  });
-
-  els.chatSearchInput.addEventListener("input", filterChats);
-  els.openSettingsBtn.addEventListener("click", openDrawer);
-  els.closeSettingsBtn.addEventListener("click", closeDrawer);
-  els.newChatBtn.addEventListener("click", openNewChatModal);
-  els.closeNewChatBtn.addEventListener("click", closeNewChatModal);
-  document.querySelectorAll("[data-close-drawer]").forEach((node) => node.addEventListener("click", closeDrawer));
-  document.querySelectorAll("[data-close-modal]").forEach((node) => node.addEventListener("click", closeNewChatModal));
-
-  els.themeChipGroup.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-theme-choice]");
-    if (!target) return;
-    saveTheme(target.dataset.themeChoice);
-  });
-  els.bgChipGroup.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-bg-choice]");
-    if (!target) return;
-    state.appearance.chatBackground = target.dataset.bgChoice;
-    persistAppearance();
-    applyAppearance();
-  });
-  els.accentSwatches.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-accent]");
-    if (!target) return;
-    state.appearance.accent = target.dataset.accent;
-    persistAppearance();
-    applyAppearance();
-  });
-  els.notificationToggle.addEventListener("change", (event) => toggleNotifications(event.target.checked));
-  els.saveLoginCodeBtn?.addEventListener("click", handleSaveLoginCode);
-
-  els.userSearchInput.addEventListener("input", () => {
-    window.clearTimeout(state.userSearchTimer);
-    const query = els.userSearchInput.value;
-    state.userSearchTimer = window.setTimeout(() => searchUsers(query), 220);
-  });
-
-  els.voiceBtn.addEventListener("click", async () => {
-    if (state.recording.active) {
-      stopVoiceRecording();
-    } else {
-      await startVoiceRecording();
-    }
-  });
-
-  window.addEventListener("resize", updateMobileLayout);
-  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
-    if (state.appearance.theme === "system") applyAppearance();
-  });
-}
-
-async function bootstrap() {
-  loadAppearance();
-  bindEvents();
-
-  try {
-    const data = await api("/api/me");
-    state.me = data.user;
-    renderMe();
-    if (!state.me.nickname) {
-      showScreen("profile");
-      return;
-    }
-    await bootMessenger();
-  } catch (error) {
-    showScreen("auth");
-  }
-}
-
-bootstrap();
+.audio-card audio { display: none; }
