@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: private-messenger-backend
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: COOKIE_SAMESITE
+        value: Lax
+      - key: SESSION_COOKIE_NAME
+        value: messenger_session
+      - key: DEBUG_RETURN_SMS_CODE
+        value: "0"
+      - key: USE_SMS_STUB
+        value: "0"
+      - key: SMS_PROVIDER
+        value: twilio_verify
+      - key: STORAGE_MODE
+        value: s3
+      - key: S3_SIGNED_URL_TTL
+        value: "600"
+      - key: AUTH_CODE_TTL_SECONDS
+        value: "300"
+      - key: AUTH_CODE_MAX_ATTEMPTS
+        value: "5"
+      - key: AUTH_CODE_RESEND_WINDOW_SECONDS
+        value: "60"
+      - key: AUTH_CODE_RATE_LIMIT_PER_15M
+        value: "5"
+      - key: VERIFY_RATE_LIMIT_PER_15M
+        value: "10"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      - key: S3_BUCKET_NAME
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
