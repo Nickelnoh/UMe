@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Optional
+from sqlalchemy import inspect, func, text
 
 import phonenumbers
 from boto3 import client as boto3_client
@@ -16,7 +17,6 @@ from dotenv import load_dotenv
 from flask import Flask, g, jsonify, redirect, render_template, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, join_room
-from sqlalchemy import func, text
 from werkzeug.utils import secure_filename
 
 try:
@@ -1005,9 +1005,18 @@ def register_routes(flask_app: Flask):
 
 
 def ensure_user_schema_upgrades():
-    columns = {row[1] for row in db.session.execute(text("PRAGMA table_info(users)"))}
+    inspector = inspect(db.engine)
+    columns = {col["name"] for col in inspector.get_columns("users")}
+
+    statements = []
+
     if "login_code_hash" not in columns:
-        db.session.execute(text("ALTER TABLE users ADD COLUMN login_code_hash VARCHAR(64)"))
+        statements.append("ALTER TABLE users ADD COLUMN login_code_hash VARCHAR(64)")
+
+    for stmt in statements:
+        db.session.execute(text(stmt))
+
+    if statements:
         db.session.commit()
 
 def create_app():
