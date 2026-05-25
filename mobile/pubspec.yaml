@@ -1,0 +1,30 @@
+name: private_messenger_mvp
+description: UMe private messenger MVP.
+publish_to: "none"
+
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  flutter_secure_storage: ^9.2.2
+  file_picker: ^11.0.2
+  mime: ^2.0.0
+  url_launcher: ^6.3.2
+  video_player: ^2.11.1
+  audioplayers: ^6.6.0
+  record: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
