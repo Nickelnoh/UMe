@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "62135047180",
+    "project_id": "ume-messenger-bd3b1",
+    "storage_bucket": "ume-messenger-bd3b1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:62135047180:android:6160d0c0dd593f7e89ca29",
+        "android_client_info": {
+          "package_name": "com.nickelnoh.ume"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBokN4RmjqudBgnumI87zhv-e8tW3nMA2w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
