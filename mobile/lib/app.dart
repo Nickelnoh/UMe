@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'core/push_service.dart';
 import 'core/secure_storage.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/chats/chats_screen.dart';
@@ -9,12 +11,46 @@ final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
   ThemeMode.system,
 );
 
-class MessengerApp extends StatelessWidget {
+class MessengerApp extends StatefulWidget {
   const MessengerApp({super.key});
+
+  @override
+  State<MessengerApp> createState() => _MessengerAppState();
+}
+
+class _MessengerAppState extends State<MessengerApp> {
+  Future<bool>? _hasTokenFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasTokenFuture = _hasToken();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestNotificationsOnOpen();
+    });
+  }
 
   Future<bool> _hasToken() async {
     final token = await SecureStorage.getAccessToken();
     return token != null && token.isNotEmpty;
+  }
+
+  Future<void> _requestNotificationsOnOpen() async {
+    try {
+      final hasToken = await _hasToken();
+
+      if (!hasToken) {
+        await PushService.requestPermissionOnly();
+        return;
+      }
+
+      await PushService.initializeAndRegister();
+    } catch (e) {
+      if (kDebugMode) {
+        print('PUSH INIT ON OPEN ERROR: $e');
+      }
+    }
   }
 
   @override
@@ -45,7 +81,7 @@ class MessengerApp extends StatelessWidget {
             '/settings': (_) => const SettingsScreen(),
           },
           home: FutureBuilder<bool>(
-            future: _hasToken(),
+            future: _hasTokenFuture,
             builder: (context, snapshot) {
               if (!snapshot.hasData) {
                 return const Scaffold(
