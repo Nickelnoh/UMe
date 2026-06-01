@@ -1,5 +1,8 @@
+*service-account*.json
+firebase-adminsdk*.json
 backend/.env
 backend/.venv/
+backend/uploads/
 __pycache__/
 *.pyc
 
