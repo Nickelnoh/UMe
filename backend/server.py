@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Set
 
 import asyncpg
+import firebase_admin
+from firebase_admin import credentials, messaging
 from argon2 import PasswordHasher
 from dotenv import load_dotenv
 from fastapi import (
@@ -34,6 +36,34 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "43200"))
+
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+firebase_ready = False
+
+
+def init_firebase():
+    global firebase_ready
+
+    if firebase_ready:
+        return
+
+    if not FIREBASE_SERVICE_ACCOUNT_JSON:
+        print("FIREBASE_SERVICE_ACCOUNT_JSON is not set; push disabled", flush=True)
+        return
+
+    try:
+        service_account_info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
+        cred = credentials.Certificate(service_account_info)
+
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+
+        firebase_ready = True
+        print("Firebase Admin initialized", flush=True)
+    except Exception as e:
+        firebase_ready = False
+        print("Firebase init error:", repr(e), flush=True)
+
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is required in .env")
@@ -171,6 +201,15 @@ class ReactionIn(BaseModel):
     reaction_type: str = Field(pattern="^(emoji|image)$")
     emoji: Optional[str] = Field(default=None, max_length=32)
     attachment_id: Optional[str] = None
+
+class PushTokenIn(BaseModel):
+    token: str = Field(min_length=10, max_length=4096)
+    platform: str = Field(default="android", max_length=32)
+
+
+class PushTokenDeleteIn(BaseModel):
+    token: str = Field(min_length=10, max_length=4096)
+
 
 
 def now() -> datetime:
@@ -411,6 +450,8 @@ async def assert_chat_member(
 async def startup():
     global db_pool
 
+    init_firebase()
+
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
         min_size=0,
@@ -544,6 +585,62 @@ async def login(data: LoginIn):
 
 @app.post("/auth/logout")
 async def logout(user_id: str = Depends(get_current_user_id)):
+    return {"ok": True}
+
+
+@app.post("/push/token")
+async def save_push_token(
+    data: PushTokenIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    current_time = now()
+    token_hash_id = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
+    platform = data.platform.strip().lower() or "unknown"
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO public.push_tokens (
+                id,
+                user_id,
+                token,
+                platform,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $5)
+            ON CONFLICT (token)
+            DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                platform = EXCLUDED.platform,
+                updated_at = EXCLUDED.updated_at
+            """,
+            token_hash_id,
+            user_id,
+            data.token,
+            platform,
+            current_time,
+        )
+
+    return {"ok": True}
+
+
+@app.post("/push/token/delete")
+async def delete_push_token(
+    data: PushTokenDeleteIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            DELETE FROM public.push_tokens
+            WHERE token = $1
+              AND user_id = $2
+            """,
+            data.token,
+            user_id,
+        )
+
     return {"ok": True}
 
 
@@ -2339,6 +2436,66 @@ async def list_messages(
     return result
 
 
+async def send_push_to_chat_members(
+    chat_id: str,
+    sender_user_id: str,
+    sender_name: str,
+    text: Optional[str],
+    message_type: str,
+):
+    if not firebase_ready:
+        print("Push skipped: Firebase is not ready", flush=True)
+        return
+
+    if message_type == "file":
+        body = "Отправлено вложение"
+    else:
+        body = text or "Новое сообщение"
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT pt.token
+            FROM public.chat_members cm
+            JOIN public.push_tokens pt
+              ON pt.user_id = cm.user_id
+            WHERE cm.chat_id = $1
+              AND cm.user_id <> $2
+              AND cm.hidden = false
+              AND cm.left_at IS NULL
+            """,
+            chat_id,
+            sender_user_id,
+        )
+
+    tokens = [row["token"] for row in rows if row["token"]]
+
+    if not tokens:
+        print("Push skipped: no tokens", flush=True)
+        return
+
+    for token in tokens:
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=sender_name,
+                    body=body[:180],
+                ),
+                data={
+                    "type": "message.created",
+                    "chat_id": chat_id,
+                    "sender_user_id": sender_user_id,
+                    "title": sender_name,
+                    "body": body[:180],
+                },
+                token=token,
+            )
+
+            messaging.send(message)
+        except Exception as e:
+            print("Push send error:", repr(e), flush=True)
+
+
 @app.post("/chats/{chat_id}/messages")
 async def send_message(
     chat_id: str,
@@ -2473,6 +2630,14 @@ async def send_message(
             "message": message_payload,
         },
         exclude_user_id=user_id,
+    )
+
+    await send_push_to_chat_members(
+        chat_id=chat_id,
+        sender_user_id=user_id,
+        sender_name=message_payload["sender_name"],
+        text=text,
+        message_type=message_type,
     )
 
     return {
