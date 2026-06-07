@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/push_service.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/top_notification.dart';
 import '../messages/chat_screen.dart';
@@ -36,9 +37,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _enablePushNotifications(showSuccess: false);
+    });
+
     _init();
   }
-
   Future<void> _init() async {
     await _loadMe();
     await _loadAll();
@@ -277,6 +282,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
       message: 'Чаты обновлены',
     );
   }
+
+  Future<void> _enablePushNotifications({bool showSuccess = true}) async {
+    try {
+      await PushService.initializeAndRegister();
+
+      if (!mounted) return;
+
+      if (showSuccess) {
+        TopNotification.success(
+          context,
+          message: 'Уведомления включены',
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      TopNotification.error(
+        context,
+        message: 'Ошибка уведомлений: ${_cleanError(e)}',
+      );
+    }
+  }
+
 
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
@@ -589,6 +617,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
               label: Text(incomingCount.toString()),
               child: const Icon(Icons.mark_email_unread_outlined),
             ),
+          ),
+          IconButton(
+            tooltip: 'Включить уведомления',
+            onPressed: () => _enablePushNotifications(),
+            icon: const Icon(Icons.notifications_active_outlined),
           ),
           IconButton(
             tooltip: 'Настройки',
