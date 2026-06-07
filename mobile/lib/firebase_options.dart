@@ -49,15 +49,15 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyD7aYg1-VDiiL9P0J3YPfAa24g0tjUkAa8',
-    appId: '1:62135047180:web:f34326f4267acf3c89ca29',
-    messagingSenderId: '62135047180',
-    projectId: 'ume-messenger-bd3b1',
-    authDomain: 'ume-messenger-bd3b1.firebaseapp.com',
-    storageBucket: 'ume-messenger-bd3b1.firebasestorage.app',
-    measurementId: 'G-KWRCFTBEXN',
-  );
+ static const FirebaseOptions web = FirebaseOptions(
+  apiKey: 'AIzaSyD7aYgl-VDiiL9P0J3YPfAa24g0tjUkAa8',
+  authDomain: 'ume-messenger-bd3b1.firebaseapp.com',
+  projectId: 'ume-messenger-bd3b1',
+  storageBucket: 'ume-messenger-bd3b1.firebasestorage.app',
+  messagingSenderId: '62135047180',
+  appId: '1:62135047180:web:f34326f4267acf3c89ca29',
+  measurementId: 'G-KWRCFTBEXN',
+);
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyBokN4RmjqudBgnumI87zhv-e8tW3nMA2w',
