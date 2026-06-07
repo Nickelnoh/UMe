@@ -13,7 +13,7 @@ class PushService {
       FlutterLocalNotificationsPlugin();
 
   static const String _webVapidKey =
-      'RpTvhkqn1AP-9LRObNiX1TI65fNZ0mhEYgAmyYQt9aI';
+      'BKGlKYUGFEPf4-V2hqN1pQwM-3RByd-wME7-l0n0CzYMLy4dIFW9SQrx2FC7kds0oQlHmT3nSlJWerjOyL8R500 ';
 
   static const String _channelId = 'ume_messages';
   static const String _channelName = 'UMe messages';
