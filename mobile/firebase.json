@@ -1,1 +1,36 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"ume-messenger-bd3b1","appId":"1:62135047180:android:6160d0c0dd593f7e89ca29","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"ume-messenger-bd3b1","configurations":{"android":"1:62135047180:android:6160d0c0dd593f7e89ca29","web":"1:62135047180:web:3c6b0030c55af3ea89ca29"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "ume-messenger-bd3b1",
+          "appId": "1:62135047180:android:6160d0c0dd593f7e89ca29",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "ume-messenger-bd3b1",
+          "configurations": {
+            "android": "1:62135047180:android:6160d0c0dd593f7e89ca29",
+            "web": "1:62135047180:web:3c6b0030c55af3ea89ca29"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

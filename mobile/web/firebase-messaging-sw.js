@@ -24,8 +24,8 @@ messaging.onBackgroundMessage((payload) => {
       payload.notification?.body ||
       payload.data?.body ||
       'Новое сообщение',
-    icon: '/UMe/icons/Icon-192.png',
-    badge: '/UMe/icons/Icon-192.png',
+    icon: '/icons/Icon-192.png',
+    badge: '/icons/Icon-192.png', 
     data: payload.data || {},
   };
 

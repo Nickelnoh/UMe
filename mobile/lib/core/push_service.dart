@@ -21,6 +21,20 @@ class PushService {
   static bool _localNotificationsReady = false;
   static bool _listenersReady = false;
 
+  static Future<bool> shouldShowPermissionBanner() async {
+    try {
+      final settings = await _messaging.getNotificationSettings();
+
+      return settings.authorizationStatus == AuthorizationStatus.notDetermined;
+    } catch (e) {
+      if (kDebugMode) {
+        print('PUSH PERMISSION BANNER CHECK ERROR: $e');
+      }
+
+      return false;
+    }
+  }
+
   static Future<void> requestPermissionOnly() async {
     try {
       final settings = await _messaging.requestPermission(
@@ -40,9 +54,34 @@ class PushService {
     }
   }
 
+  static Future<void> registerIfPermissionAlreadyGranted() async {
+    try {
+      final settings = await _messaging.getNotificationSettings();
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional) {
+        await initializeAndRegister();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('PUSH REGISTER IF GRANTED ERROR: $e');
+      }
+    }
+  }
+
   static Future<void> initializeAndRegister() async {
     try {
       await requestPermissionOnly();
+
+      final settings = await _messaging.getNotificationSettings();
+
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        if (kDebugMode) {
+          print('PUSH NOT AUTHORIZED: ${settings.authorizationStatus}');
+        }
+        return;
+      }
 
       if (!kIsWeb) {
         await _setupLocalNotifications();

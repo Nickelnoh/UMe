@@ -14,3 +14,4 @@ mobile/.packages
 
 *.apk
 *.aab
+mobile/.firebase/
