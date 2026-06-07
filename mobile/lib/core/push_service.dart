@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -25,12 +27,11 @@ class PushService {
     try {
       final settings = await _messaging.getNotificationSettings();
 
+      print('PUSH BANNER CHECK STATUS: ${settings.authorizationStatus}');
+
       return settings.authorizationStatus == AuthorizationStatus.notDetermined;
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH PERMISSION BANNER CHECK ERROR: $e');
-      }
-
+      print('PUSH PERMISSION BANNER CHECK ERROR: $e');
       return false;
     }
   }
@@ -44,13 +45,10 @@ class PushService {
         provisional: false,
       );
 
-      if (kDebugMode) {
-        print('PUSH PERMISSION STATUS: ${settings.authorizationStatus}');
-      }
+      print('PUSH PERMISSION STATUS: ${settings.authorizationStatus}');
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH PERMISSION REQUEST ERROR: $e');
-      }
+      print('PUSH PERMISSION REQUEST ERROR: $e');
+      rethrow;
     }
   }
 
@@ -58,28 +56,31 @@ class PushService {
     try {
       final settings = await _messaging.getNotificationSettings();
 
+      print('PUSH REGISTER IF GRANTED STATUS: ${settings.authorizationStatus}');
+
       if (settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional) {
         await initializeAndRegister();
       }
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH REGISTER IF GRANTED ERROR: $e');
-      }
+      print('PUSH REGISTER IF GRANTED ERROR: $e');
+      rethrow;
     }
   }
 
   static Future<void> initializeAndRegister() async {
     try {
+      print('PUSH INIT START');
+
       await requestPermissionOnly();
 
       final settings = await _messaging.getNotificationSettings();
 
+      print('PUSH SETTINGS AFTER REQUEST: ${settings.authorizationStatus}');
+
       if (settings.authorizationStatus != AuthorizationStatus.authorized &&
           settings.authorizationStatus != AuthorizationStatus.provisional) {
-        if (kDebugMode) {
-          print('PUSH NOT AUTHORIZED: ${settings.authorizationStatus}');
-        }
+        print('PUSH NOT AUTHORIZED: ${settings.authorizationStatus}');
         return;
       }
 
@@ -91,47 +92,76 @@ class PushService {
 
       final token = await _getToken();
 
-      if (token != null && token.isNotEmpty) {
-        await _sendTokenToBackend(token);
+      print(
+        'PUSH TOKEN VALUE: ${token == null ? "NULL" : "OK length=${token.length}"}',
+      );
+
+      if (token == null || token.isEmpty) {
+        print('PUSH TOKEN EMPTY, REQUEST NOT SENT');
+        return;
       }
+
+      await _sendTokenToBackend(token);
+
+      print('PUSH INIT DONE');
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH INIT ERROR: $e');
-      }
+      print('PUSH INIT ERROR: $e');
+      rethrow;
     }
   }
 
   static void _setupListeners() {
     if (_listenersReady) {
+      print('PUSH LISTENERS ALREADY READY');
       return;
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('PUSH FOREGROUND MESSAGE: ${message.messageId}');
+
       if (!kIsWeb) {
         _showForegroundNotification(message);
       }
     });
 
     _messaging.onTokenRefresh.listen((token) async {
+      print('PUSH TOKEN REFRESHED length=${token.length}');
       await _sendTokenToBackend(token);
     });
 
     _listenersReady = true;
+    print('PUSH LISTENERS READY');
   }
 
   static Future<String?> _getToken() async {
+    print('PUSH GET TOKEN START, kIsWeb=$kIsWeb');
+
     if (kIsWeb) {
-      return _messaging.getToken(
+      final token = await _messaging.getToken(
         vapidKey: _webVapidKey,
       );
+
+      print(
+        'PUSH GET WEB TOKEN RESULT: ${token == null ? "NULL" : "OK length=${token.length}"}',
+      );
+
+      return token;
     }
 
-    return _messaging.getToken();
+    final token = await _messaging.getToken();
+
+    print(
+      'PUSH GET MOBILE TOKEN RESULT: ${token == null ? "NULL" : "OK length=${token.length}"}',
+    );
+
+    return token;
   }
 
   static Future<void> _sendTokenToBackend(String token) async {
     try {
       final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
+
+      print('PUSH TOKEN SEND START: platform=$platform length=${token.length}');
 
       await ApiClient.post(
         '/push/token',
@@ -141,13 +171,10 @@ class PushService {
         },
       );
 
-      if (kDebugMode) {
-        print('PUSH TOKEN REGISTERED: $platform');
-      }
+      print('PUSH TOKEN REGISTERED: $platform');
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH TOKEN SEND ERROR: $e');
-      }
+      print('PUSH TOKEN SEND ERROR: $e');
+      rethrow;
     }
   }
 
@@ -156,6 +183,7 @@ class PushService {
       final token = await _getToken();
 
       if (token == null || token.isEmpty) {
+        print('PUSH TOKEN DELETE SKIPPED: empty token');
         return;
       }
 
@@ -165,15 +193,17 @@ class PushService {
           'token': token,
         },
       );
+
+      print('PUSH TOKEN DELETED');
     } catch (e) {
-      if (kDebugMode) {
-        print('PUSH TOKEN DELETE ERROR: $e');
-      }
+      print('PUSH TOKEN DELETE ERROR: $e');
+      rethrow;
     }
   }
 
   static Future<void> _setupLocalNotifications() async {
     if (_localNotificationsReady) {
+      print('PUSH LOCAL NOTIFICATIONS ALREADY READY');
       return;
     }
 
@@ -202,6 +232,7 @@ class PushService {
         ?.createNotificationChannel(channel);
 
     _localNotificationsReady = true;
+    print('PUSH LOCAL NOTIFICATIONS READY');
   }
 
   static Future<void> _showForegroundNotification(RemoteMessage message) async {
