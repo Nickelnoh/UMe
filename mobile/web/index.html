@@ -18,19 +18,97 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="UMe Messenger">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="mobile">
+  <meta name="apple-mobile-web-app-title" content="UMe Messenger">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>mobile</title>
+  <title>UMe Messenger</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- OneSignal Web SDK -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+
+    window.umeOneSignalInit = function (appId) {
+      return new Promise(function (resolve, reject) {
+        window.OneSignalDeferred.push(async function (OneSignal) {
+          try {
+            await OneSignal.init({
+              appId: appId,
+              serviceWorkerPath: "OneSignalSDKWorker.js",
+              serviceWorkerParam: {
+                scope: "/"
+              },
+              notifyButton: {
+                enable: false
+              },
+              allowLocalhostAsSecureOrigin: true
+            });
+
+            console.log("ONESIGNAL WEB INIT DONE");
+            resolve(true);
+          } catch (e) {
+            console.error("ONESIGNAL WEB INIT ERROR", e);
+            reject(e);
+          }
+        });
+      });
+    };
+
+    window.umeOneSignalLogin = function (userId) {
+      return new Promise(function (resolve, reject) {
+        window.OneSignalDeferred.push(async function (OneSignal) {
+          try {
+            await OneSignal.login(userId);
+            console.log("ONESIGNAL WEB LOGIN USER", userId);
+            resolve(true);
+          } catch (e) {
+            console.error("ONESIGNAL WEB LOGIN ERROR", e);
+            reject(e);
+          }
+        });
+      });
+    };
+
+    window.umeOneSignalRequestPermission = function () {
+      return new Promise(function (resolve, reject) {
+        window.OneSignalDeferred.push(async function (OneSignal) {
+          try {
+            const result = await OneSignal.Notifications.requestPermission();
+            console.log("ONESIGNAL WEB PERMISSION", result);
+            resolve(result);
+          } catch (e) {
+            console.error("ONESIGNAL WEB PERMISSION ERROR", e);
+            reject(e);
+          }
+        });
+      });
+    };
+
+    window.umeOneSignalLogout = function () {
+      return new Promise(function (resolve, reject) {
+        window.OneSignalDeferred.push(async function (OneSignal) {
+          try {
+            await OneSignal.logout();
+            console.log("ONESIGNAL WEB LOGOUT");
+            resolve(true);
+          } catch (e) {
+            console.error("ONESIGNAL WEB LOGOUT ERROR", e);
+            reject(e);
+          }
+        });
+      });
+    };
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
