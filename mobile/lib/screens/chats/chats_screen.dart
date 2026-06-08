@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
-import '../../core/push_service.dart';
+import '../../core/onesignal_service.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/top_notification.dart';
 import '../messages/chat_screen.dart';
@@ -37,11 +37,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _enablePushNotifications(showSuccess: false);
-    });
-
     _init();
   }
   Future<void> _init() async {
@@ -53,11 +48,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
   Future<void> _loadMe() async {
     try {
       final me = await ApiClient.get('/me');
+      final userId = me['id']?.toString();
 
       if (!mounted) return;
 
       setState(() {
-        _myUserId = me['id']?.toString();
+        _myUserId = userId;
         _myName = me['display_name']?.toString().trim().isNotEmpty == true
             ? me['display_name'].toString()
             : me['nickname']?.toString().trim().isNotEmpty == true
@@ -66,6 +62,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _accentColor = me['accent_color']?.toString() ?? 'blue';
         _chatWallpaper = me['chat_wallpaper']?.toString() ?? 'default';
       });
+
+      if (userId != null && userId.isNotEmpty) {
+        await OneSignalService.loginUser(userId);
+      }
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -285,7 +285,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Future<void> _enablePushNotifications({bool showSuccess = true}) async {
     try {
-      await PushService.initializeAndRegister();
+      if (_myUserId != null && _myUserId!.isNotEmpty) {
+        await OneSignalService.loginUser(_myUserId!);
+      }
+
+      await OneSignalService.requestPermission();
 
       if (!mounted) return;
 
