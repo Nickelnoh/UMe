@@ -2423,7 +2423,7 @@ def _send_onesignal_request_sync(payload: dict) -> dict:
         data=body,
         method="POST",
         headers={
-            "Authorization": f"Basic {ONESIGNAL_REST_API_KEY}",
+            "Authorization": f"key {"wtuwuj34geksus2clqvvairwk"}",
             "Content-Type": "application/json; charset=utf-8",
             "Accept": "application/json",
         },
