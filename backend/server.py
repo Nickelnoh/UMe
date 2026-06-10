@@ -4,13 +4,14 @@ import json
 import hashlib
 import secrets
 import mimetypes
+import asyncio
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Set
 
 import asyncpg
-import firebase_admin
-from firebase_admin import credentials, messaging
 from argon2 import PasswordHasher
 from dotenv import load_dotenv
 from fastapi import (
@@ -37,32 +38,9 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "43200"))
 
-FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-firebase_ready = False
-
-
-def init_firebase():
-    global firebase_ready
-
-    if firebase_ready:
-        return
-
-    if not FIREBASE_SERVICE_ACCOUNT_JSON:
-        print("FIREBASE_SERVICE_ACCOUNT_JSON is not set; push disabled", flush=True)
-        return
-
-    try:
-        service_account_info = json.loads(FIREBASE_SERVICE_ACCOUNT_JSON)
-        cred = credentials.Certificate(service_account_info)
-
-        if not firebase_admin._apps:
-            firebase_admin.initialize_app(cred)
-
-        firebase_ready = True
-        print("Firebase Admin initialized", flush=True)
-    except Exception as e:
-        firebase_ready = False
-        print("Firebase init error:", repr(e), flush=True)
+ONESIGNAL_APP_ID = os.getenv("ONESIGNAL_APP_ID")
+ONESIGNAL_REST_API_KEY = os.getenv("ONESIGNAL_REST_API_KEY")
+ONESIGNAL_API_URL = "https://api.onesignal.com/notifications"
 
 
 if not DATABASE_URL:
@@ -449,8 +427,6 @@ async def assert_chat_member(
 @app.on_event("startup")
 async def startup():
     global db_pool
-
-    init_firebase()
 
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
@@ -2436,6 +2412,78 @@ async def list_messages(
     return result
 
 
+def _send_onesignal_request_sync(payload: dict) -> dict:
+    if not ONESIGNAL_REST_API_KEY:
+        raise RuntimeError("ONESIGNAL_REST_API_KEY is not set")
+
+    body = json.dumps(payload).encode("utf-8")
+
+    request = urllib.request.Request(
+        ONESIGNAL_API_URL,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Basic {ONESIGNAL_REST_API_KEY}",
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OneSignal HTTP {e.code}: {error_body}") from e
+
+
+async def send_onesignal_push_to_users(
+    target_user_ids: list[str],
+    title: str,
+    body: str,
+    chat_id: str,
+    sender_user_id: str,
+):
+    if not ONESIGNAL_APP_ID or not ONESIGNAL_REST_API_KEY:
+        print("OneSignal skipped: env is not configured", flush=True)
+        return
+
+    target_user_ids = [user_id for user_id in target_user_ids if user_id]
+
+    if not target_user_ids:
+        print("OneSignal skipped: no target users", flush=True)
+        return
+
+    payload = {
+        "app_id": ONESIGNAL_APP_ID,
+        "include_aliases": {
+            "external_id": target_user_ids,
+        },
+        "target_channel": "push",
+        "headings": {
+            "en": title,
+            "ru": title,
+        },
+        "contents": {
+            "en": body[:180],
+            "ru": body[:180],
+        },
+        "data": {
+            "type": "message.created",
+            "chat_id": chat_id,
+            "sender_user_id": sender_user_id,
+        },
+        "web_url": f"https://ume-messenger-bd3b1.web.app/",
+    }
+
+    try:
+        result = await asyncio.to_thread(_send_onesignal_request_sync, payload)
+        print("OneSignal push sent:", result, flush=True)
+    except Exception as e:
+        print("OneSignal push error:", repr(e), flush=True)
+
+
 async def send_push_to_chat_members(
     chat_id: str,
     sender_user_id: str,
@@ -2443,10 +2491,6 @@ async def send_push_to_chat_members(
     text: Optional[str],
     message_type: str,
 ):
-    if not firebase_ready:
-        print("Push skipped: Firebase is not ready", flush=True)
-        return
-
     if message_type == "file":
         body = "Отправлено вложение"
     else:
@@ -2455,10 +2499,8 @@ async def send_push_to_chat_members(
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT DISTINCT pt.token
+            SELECT DISTINCT cm.user_id
             FROM public.chat_members cm
-            JOIN public.push_tokens pt
-              ON pt.user_id = cm.user_id
             WHERE cm.chat_id = $1
               AND cm.user_id <> $2
               AND cm.hidden = false
@@ -2468,33 +2510,15 @@ async def send_push_to_chat_members(
             sender_user_id,
         )
 
-    tokens = [row["token"] for row in rows if row["token"]]
+    target_user_ids = [row["user_id"] for row in rows if row["user_id"]]
 
-    if not tokens:
-        print("Push skipped: no tokens", flush=True)
-        return
-
-    for token in tokens:
-        try:
-            message = messaging.Message(
-                notification=messaging.Notification(
-                    title=sender_name,
-                    body=body[:180],
-                ),
-                data={
-                    "type": "message.created",
-                    "chat_id": chat_id,
-                    "sender_user_id": sender_user_id,
-                    "title": sender_name,
-                    "body": body[:180],
-                },
-                token=token,
-            )
-
-            messaging.send(message)
-        except Exception as e:
-            print("Push send error:", repr(e), flush=True)
-
+    await send_onesignal_push_to_users(
+        target_user_ids=target_user_ids,
+        title=sender_name,
+        body=body,
+        chat_id=chat_id,
+        sender_user_id=sender_user_id,
+    )
 
 @app.post("/chats/{chat_id}/messages")
 async def send_message(
