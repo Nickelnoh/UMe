@@ -50,6 +50,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
       final me = await ApiClient.get('/me');
       final userId = me['id']?.toString();
 
+  if (userId != null && userId.isNotEmpty) {
+  await OneSignalService.loginUser(userId);
+}
+
       if (!mounted) return;
 
       setState(() {
