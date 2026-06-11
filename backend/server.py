@@ -2422,11 +2422,11 @@ def _send_onesignal_request_sync(payload: dict) -> dict:
         ONESIGNAL_API_URL,
         data=body,
         method="POST",
-        headers={
-            "Authorization": f"key {"os_v2_app_syatfrrkozfjfhwhjlj2ofipx44sxfz2o4huig5qmmqyxe7hhlgs7ijmlwc3u2myfggq6bnpycdpjezlbw2qjy2omgmrgpfev4iwtry"}",
-            "Content-Type": "application/json; charset=utf-8",
-            "Accept": "application/json",
-        },
+headers={
+    "Authorization": f"Key {ONESIGNAL_REST_API_KEY.strip()}",
+    "Content-Type": "application/json; charset=utf-8",
+    "Accept": "application/json",
+},
     )
 
     try:
