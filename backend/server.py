@@ -2445,6 +2445,15 @@ async def send_onesignal_push_to_users(
     chat_id: str,
     sender_user_id: str,
 ):
+    print(
+        "OneSignal target users:",
+        {
+            "chat_id": chat_id,
+            "sender_user_id": sender_user_id,
+            "target_user_ids": target_user_ids,
+        },
+        flush=True,
+    )
     if not ONESIGNAL_APP_ID or not ONESIGNAL_REST_API_KEY:
         print("OneSignal skipped: env is not configured", flush=True)
         return
