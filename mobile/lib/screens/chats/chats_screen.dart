@@ -1,13 +1,17 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/onesignal_service.dart';
+import '../../core/secure_storage.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/top_notification.dart';
 import '../messages/chat_screen.dart';
 import 'create_group_screen.dart';
 import '../settings/settings_screen.dart';
+
+enum _ChatsTab { chats, requests, groups }
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -27,17 +31,22 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   String? _myUserId;
   String _myName = '';
-  String _accentColor = 'blue';
+
+  _ChatsTab _selectedTab = _ChatsTab.chats;
 
   List<dynamic> _chats = [];
   List<dynamic> _incomingRequests = [];
   List<dynamic> _outgoingRequests = [];
+
+  Color get _whatsAppGreen => const Color(0xFF075E54);
+  Color get _whatsAppFabGreen => const Color(0xFF25D366);
 
   @override
   void initState() {
     super.initState();
     _init();
   }
+
   Future<void> _init() async {
     await _loadMe();
     await _loadAll();
@@ -62,7 +71,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             : me['nickname']?.toString().trim().isNotEmpty == true
                 ? me['nickname'].toString()
                 : me['username']?.toString() ?? '';
-        _accentColor = me['accent_color']?.toString() ?? 'blue';
       });
     } catch (e) {
       _showError(_cleanError(e));
@@ -97,7 +105,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             title: 'Новый чат',
             message: title,
           );
-
           return;
         }
 
@@ -130,7 +137,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   : 'Новое вложение',
             );
           }
-
           return;
         }
 
@@ -159,7 +165,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             title: 'Запрос на чат',
             message: '$requesterName хочет начать чат',
           );
-
           return;
         }
 
@@ -172,7 +177,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             context,
             message: 'Запрос на чат принят',
           );
-
           return;
         }
 
@@ -185,7 +189,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
             context,
             message: 'Запрос на чат отклонён',
           );
+          return;
+        }
 
+        if (type == 'chat_request.cancelled') {
+          await _loadRequests(silent: true);
+          return;
+        }
+
+        if (type == 'chat.deleted' || type == 'chat.left') {
+          await _loadChats(silent: true);
           return;
         }
       });
@@ -273,9 +286,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     if (_refreshing) return;
 
     if (mounted) {
-      setState(() {
-        _refreshing = true;
-      });
+      setState(() => _refreshing = true);
     }
 
     try {
@@ -290,9 +301,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       );
     } finally {
       if (mounted) {
-        setState(() {
-          _refreshing = false;
-        });
+        setState(() => _refreshing = false);
       }
     }
   }
@@ -307,9 +316,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        _notificationsEnabled = true;
-      });
+      setState(() => _notificationsEnabled = true);
 
       if (showSuccess) {
         TopNotification.success(
@@ -327,12 +334,59 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Выйти из аккаунта?'),
+          content: const Text(
+            'Вы выйдете из UMe на этом устройстве. Чтобы вернуться, нужно будет снова войти.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: _whatsAppGreen),
+              child: const Text('Выйти'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      try {
+        await ApiClient.post('/auth/logout', {});
+      } catch (_) {}
+
+      try {
+        await OneSignalService.logoutUser();
+      } catch (_) {}
+
+      await _wsSubscription?.cancel();
+      _ws.dispose();
+      await SecureStorage.clear();
+
+      if (!mounted) return;
+
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/login',
+        (route) => false,
+      );
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
 
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const SettingsScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
 
     if (!mounted) return;
@@ -348,7 +402,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       showDragHandle: true,
       builder: (sheetContext) {
         return _UserSearchSheet(
-          accent: _accentColorValue(),
+          accent: _whatsAppGreen,
           onRequestSent: () async {
             await _loadRequests(silent: true);
 
@@ -372,27 +426,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  Future<void> _openRequests() async {
-    await _loadRequests(silent: true);
-
-    if (!mounted) return;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        return _ChatRequestsSheet(
-          accent: _accentColorValue(),
-          incomingRequests: _incomingRequests,
-          outgoingRequests: _outgoingRequests,
-          onAccept: _acceptRequest,
-          onDecline: _declineRequest,
-        );
-      },
-    );
-  }
-
   Future<void> _acceptRequest(String requestId) async {
     try {
       final result = await ApiClient.post(
@@ -403,8 +436,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
       await _loadAll(silent: true);
 
       if (!mounted) return;
-
-      Navigator.of(context).pop();
 
       TopNotification.success(
         context,
@@ -436,8 +467,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).pop();
-
       TopNotification.info(
         context,
         message: 'Запрос отклонён',
@@ -447,11 +476,80 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
   }
 
+  Future<void> _cancelRequest(String requestId) async {
+    try {
+      await ApiClient.post('/chat-requests/$requestId/cancel', {});
+      await _loadRequests(silent: true);
+
+      if (!mounted) return;
+
+      TopNotification.info(
+        context,
+        message: 'Запрос отменён',
+      );
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
+
+  Future<void> _confirmDeleteChat(
+    String chatId,
+    String title, {
+    bool isGroup = false,
+  }) async {
+    if (chatId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(isGroup ? 'Удалить группу?' : 'Удалить чат?'),
+          content: Text(
+            isGroup
+                ? 'Группа "$title" исчезнет из вашего списка чатов. Для остальных участников она останется.'
+                : 'Чат "$title" будет скрыт из вашего списка.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFD32F2F),
+              ),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    await _deleteChat(chatId);
+  }
+
+  Future<void> _deleteChat(String chatId) async {
+    try {
+      await ApiClient.post('/chats/$chatId/delete', {});
+      await _loadChats(silent: true);
+
+      if (!mounted) return;
+
+      TopNotification.info(
+        context,
+        message: 'Чат удалён',
+      );
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
+
   Future<void> _openCreateGroup() async {
     final result = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => const CreateGroupScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
     );
 
     if (!mounted) return;
@@ -464,11 +562,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final title = result['title']?.toString() ?? 'Группа';
 
     if (chatId != null && chatId.isNotEmpty) {
-      _openChat(
-        chatId,
-        title,
-        isGroup: true,
-      );
+      _openChat(chatId, title, isGroup: true);
     }
   }
 
@@ -488,70 +582,25 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  Color _accentColorValue() {
-    final parsed = _parseAccentColor(_accentColor);
-
-    if (parsed != null) return parsed;
-
-    switch (_accentColor) {
-      case 'green':
-        return Colors.green;
-      case 'purple':
-        return Colors.purple;
-      case 'orange':
-        return Colors.orange;
-      case 'pink':
-        return Colors.pink;
-      case 'blue':
-      default:
-        return Colors.blue;
-    }
-  }
-
-  Color? _parseAccentColor(String value) {
-    final text = value.trim();
-
-    if (!text.startsWith('#')) return null;
-
-    final hex = text.substring(1);
-
-    if (hex.length != 6 && hex.length != 8) return null;
-
-    final parsed = int.tryParse(hex, radix: 16);
-
-    if (parsed == null) return null;
-
-    if (hex.length == 6) {
-      return Color(0xFF000000 | parsed);
-    }
-
-    return Color(parsed);
-  }
-
-String _cleanError(Object e) {
+  String _cleanError(Object e) {
     var text = e.toString();
     text = text.replaceFirst('Exception: ', '');
 
     if (text.contains('Failed to fetch')) {
       return 'Не удалось подключиться к серверу';
     }
-
     if (text.contains('TimeoutException')) {
       return 'Сервер не ответил вовремя';
     }
-
     if (text.contains('Chat request already pending')) {
       return 'Запрос уже отправлен';
     }
-
     if (text.contains('Chat already exists')) {
       return 'Чат уже существует';
     }
-
     if (text.contains('User not found')) {
       return 'Пользователь не найден';
     }
-
     if (text.contains('Invalid token')) {
       return 'Сессия устарела. Войдите заново';
     }
@@ -561,11 +610,7 @@ String _cleanError(Object e) {
 
   void _showError(String message) {
     if (!mounted) return;
-
-    TopNotification.error(
-      context,
-      message: message,
-    );
+    TopNotification.error(context, message: message);
   }
 
   @override
@@ -582,18 +627,16 @@ String _cleanError(Object e) {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Меню',
-      barrierColor: Colors.black.withValues(alpha: 0.45),
-      transitionDuration: const Duration(milliseconds: 230),
+      barrierColor: Colors.black.withValues(alpha: 0.30),
+      transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
         return Align(
-          alignment: Alignment.centerLeft,
+          alignment: Alignment.centerRight,
           child: Material(
             color: Colors.transparent,
             child: _MobileSideMenu(
               name: _myName.isNotEmpty ? _myName : 'UMe user',
               accent: accent,
-              incomingCount: _incomingRequests.length,
-              outgoingCount: _outgoingRequests.length,
               notificationsEnabled: _notificationsEnabled,
               onFindUser: () {
                 Navigator.of(dialogContext).pop();
@@ -602,10 +645,6 @@ String _cleanError(Object e) {
               onCreateGroup: () {
                 Navigator.of(dialogContext).pop();
                 _openCreateGroup();
-              },
-              onRequests: () {
-                Navigator.of(dialogContext).pop();
-                _openRequests();
               },
               onSettings: () {
                 Navigator.of(dialogContext).pop();
@@ -619,6 +658,10 @@ String _cleanError(Object e) {
                 Navigator.of(dialogContext).pop();
                 _enablePushNotifications();
               },
+              onLogout: () {
+                Navigator.of(dialogContext).pop();
+                _logout();
+              },
             ),
           ),
         );
@@ -631,19 +674,14 @@ String _cleanError(Object e) {
 
         return SlideTransition(
           position: Tween<Offset>(
-            begin: const Offset(-1, 0),
+            begin: const Offset(1, 0),
             end: Offset.zero,
           ).animate(curved),
-          child: FadeTransition(
-            opacity: curved,
-            child: child,
-          ),
+          child: FadeTransition(opacity: curved, child: child),
         );
       },
     );
   }
-
-  Color get _whatsAppGreen => const Color(0xFF075E54);
 
   String _formatChatTime(String? value) {
     if (value == null || value.trim().isEmpty) return '';
@@ -671,9 +709,8 @@ String _cleanError(Object e) {
   @override
   Widget build(BuildContext context) {
     final incomingCount = _incomingRequests.length;
-    final outgoingCount = _outgoingRequests.length;
     final green = _whatsAppGreen;
-    final fabGreen = const Color(0xFF25D366);
+    final list = _visibleChats();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
@@ -684,11 +721,15 @@ String _cleanError(Object e) {
             name: _myName,
             chatsCount: _chats.length,
             incomingCount: incomingCount,
+            selectedTab: _selectedTab,
             onMenu: _openMobileSideMenu,
+            onChats: () => setState(() => _selectedTab = _ChatsTab.chats),
+            onRequests: () => setState(() => _selectedTab = _ChatsTab.requests),
+            onGroups: () => setState(() => _selectedTab = _ChatsTab.groups),
           ),
           Expanded(
             child: RefreshIndicator(
-              color: fabGreen,
+              color: _whatsAppFabGreen,
               onRefresh: _refresh,
               child: _loading
                   ? ListView(
@@ -698,67 +739,94 @@ String _cleanError(Object e) {
                         Center(child: CircularProgressIndicator()),
                       ],
                     )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(0, 0, 0, 96),
-                      children: [
-                        if (incomingCount > 0 || outgoingCount > 0)
-                          _WhatsRequestsBanner(
-                            green: green,
-                            incomingCount: incomingCount,
-                            outgoingCount: outgoingCount,
-                            onTap: _openRequests,
-                          ),
-                        if (_chats.isEmpty)
-                          _WhatsEmptyChats(
-                            green: green,
-                            onFind: _openSearchUsers,
-                          )
-                        else
-                          ..._chats.map((item) {
-                            final chat = Map<String, dynamic>.from(item as Map);
-                            final chatId = chat['id']?.toString() ?? '';
-                            final title = chat['title']?.toString() ?? 'Чат';
-                            final avatarUrl = chat['avatar_url']?.toString();
-                            final isGroup = chat['is_group'] == true;
-                            final memberCount = chat['member_count'] is int
-                                ? chat['member_count'] as int
-                                : int.tryParse(chat['member_count']?.toString() ?? '') ?? 0;
-                            final lastMessage = chat['last_message_text']?.toString().trim();
-                            final lastType = chat['last_message_type']?.toString();
-                            final time = _formatChatTime(
-                              chat['last_message_created_at']?.toString(),
-                            );
-                            final baseSubtitle = lastMessage != null && lastMessage.isNotEmpty
-                                ? lastMessage
-                                : _fallbackLastMessage(lastType);
-
-                            return _WhatsChatTile(
-                              green: green,
-                              title: title,
-                              subtitle: isGroup
-                                  ? 'Группа · $memberCount участн. · $baseSubtitle'
-                                  : baseSubtitle,
-                              time: time,
-                              avatarUrl: avatarUrl,
-                              isGroup: isGroup,
-                              onTap: () {
-                                if (chatId.isEmpty) return;
-
-                                _openChat(
-                                  chatId,
-                                  title,
-                                  isGroup: isGroup,
+                  : _selectedTab == _ChatsTab.requests
+                      ? _RequestsTabBody(
+                          green: green,
+                          incomingRequests: _incomingRequests,
+                          outgoingRequests: _outgoingRequests,
+                          onAccept: (id) => _acceptRequest(id),
+                          onDecline: (id) => _declineRequest(id),
+                          onCancel: (id) => _cancelRequest(id),
+                        )
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+                          children: [
+                            if (list.isEmpty)
+                              _WhatsEmptyChats(
+                                green: green,
+                                onFind: _openSearchUsers,
+                                message: _selectedTab == _ChatsTab.groups
+                                    ? 'Групповых чатов пока нет'
+                                    : 'Пока нет чатов',
+                              )
+                            else
+                              ...list.map((item) {
+                                final chat = Map<String, dynamic>.from(item as Map);
+                                final chatId = chat['id']?.toString() ?? '';
+                                final title = chat['title']?.toString() ?? 'Чат';
+                                final avatarUrl = chat['avatar_url']?.toString();
+                                final isGroup = chat['is_group'] == true;
+                                final time = _formatChatTime(
+                                  chat['last_message_created_at']?.toString(),
                                 );
-                              },
-                            );
-                          }),
-                      ],
-                    ),
+                                final subtitle = _chatSubtitle(chat);
+
+                                return _WhatsChatTile(
+                                  green: green,
+                                  title: title,
+                                  subtitle: subtitle,
+                                  time: time,
+                                  avatarUrl: avatarUrl,
+                                  isGroup: isGroup,
+                                  onTap: () {
+                                    if (chatId.isEmpty) return;
+                                    _openChat(chatId, title, isGroup: isGroup);
+                                  },
+                                  onLongPress: () => _confirmDeleteChat(
+                                    chatId,
+                                    title,
+                                    isGroup: isGroup,
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  List<dynamic> _visibleChats() {
+    if (_selectedTab == _ChatsTab.groups) {
+      return _chats.where((item) {
+        final chat = Map<String, dynamic>.from(item as Map);
+        return chat['is_group'] == true;
+      }).toList();
+    }
+
+    return _chats;
+  }
+
+  String _chatSubtitle(Map<String, dynamic> chat) {
+    final lastMessage = chat['last_message_text']?.toString().trim();
+    final lastType = chat['last_message_type']?.toString();
+    final lastSender = chat['last_message_sender_name']?.toString().trim().isNotEmpty == true
+        ? chat['last_message_sender_name'].toString().trim()
+        : chat['last_sender_name']?.toString().trim().isNotEmpty == true
+            ? chat['last_sender_name'].toString().trim()
+            : chat['sender_name']?.toString().trim();
+
+    final base = lastMessage != null && lastMessage.isNotEmpty
+        ? lastMessage
+        : _fallbackLastMessage(lastType);
+
+    if (chat['is_group'] == true && lastSender != null && lastSender.isNotEmpty) {
+      return '$lastSender: $base';
+    }
+
+    return base;
   }
 
   String _fallbackLastMessage(String? type) {
@@ -773,20 +841,27 @@ String _cleanError(Object e) {
   }
 }
 
-
 class _WhatsTopBar extends StatelessWidget {
   final Color green;
   final String name;
   final int chatsCount;
   final int incomingCount;
+  final _ChatsTab selectedTab;
   final VoidCallback onMenu;
+  final VoidCallback onChats;
+  final VoidCallback onRequests;
+  final VoidCallback onGroups;
 
   const _WhatsTopBar({
     required this.green,
     required this.name,
     required this.chatsCount,
     required this.incomingCount,
+    required this.selectedTab,
     required this.onMenu,
+    required this.onChats,
+    required this.onRequests,
+    required this.onGroups,
   });
 
   @override
@@ -796,10 +871,7 @@ class _WhatsTopBar extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            green,
-            const Color(0xFF128C7E),
-          ],
+          colors: [green, const Color(0xFF128C7E)],
         ),
         boxShadow: [
           BoxShadow(
@@ -861,26 +933,28 @@ class _WhatsTopBar extends StatelessWidget {
               height: 52,
               child: Row(
                 children: [
-                  const SizedBox(width: 4),
                   Expanded(
                     child: _WhatsTab(
                       title: 'ЧАТЫ',
-                      active: true,
+                      active: selectedTab == _ChatsTab.chats,
                       badge: chatsCount,
+                      onTap: onChats,
                     ),
                   ),
                   Expanded(
                     child: _WhatsTab(
                       title: 'ЗАПРОСЫ',
-                      active: false,
+                      active: selectedTab == _ChatsTab.requests,
                       badge: incomingCount,
+                      onTap: onRequests,
                     ),
                   ),
-                  const Expanded(
+                  Expanded(
                     child: _WhatsTab(
                       title: 'ГРУППЫ',
-                      active: false,
+                      active: selectedTab == _ChatsTab.groups,
                       badge: 0,
+                      onTap: onGroups,
                     ),
                   ),
                 ],
@@ -897,128 +971,281 @@ class _WhatsTab extends StatelessWidget {
   final String title;
   final bool active;
   final int badge;
+  final VoidCallback onTap;
 
   const _WhatsTab({
     required this.title,
     required this.active,
     required this.badge,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      children: [
-        Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: active ? 1.0 : 0.70),
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.2,
-                ),
-              ),
-              if (badge > 0) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: active ? Colors.white : Colors.white.withValues(alpha: 0.22),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    badge > 99 ? '99+' : badge.toString(),
-                    style: TextStyle(
-                      color: active ? const Color(0xFF075E54) : Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (active)
-          Container(
-            height: 4,
-            margin: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(4),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _WhatsRequestsBanner extends StatelessWidget {
-  final Color green;
-  final int incomingCount;
-  final int outgoingCount;
-  final VoidCallback onTap;
-
-  const _WhatsRequestsBanner({
-    required this.green,
-    required this.incomingCount,
-    required this.outgoingCount,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final parts = <String>[];
+    return InkWell(
+      onTap: onTap,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: active ? 1.0 : 0.70),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                if (badge > 0) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: active ? Colors.white : Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      badge > 99 ? '99+' : badge.toString(),
+                      style: TextStyle(
+                        color: active ? const Color(0xFF075E54) : Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (active)
+            Container(
+              height: 4,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(4)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
-    if (incomingCount > 0) parts.add('входящие: $incomingCount');
-    if (outgoingCount > 0) parts.add('исходящие: $outgoingCount');
+class _RequestsTabBody extends StatelessWidget {
+  final Color green;
+  final List<dynamic> incomingRequests;
+  final List<dynamic> outgoingRequests;
+  final Future<void> Function(String requestId) onAccept;
+  final Future<void> Function(String requestId) onDecline;
+  final Future<void> Function(String requestId) onCancel;
+
+  const _RequestsTabBody({
+    required this.green,
+    required this.incomingRequests,
+    required this.outgoingRequests,
+    required this.onAccept,
+    required this.onDecline,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasAny = incomingRequests.isNotEmpty || outgoingRequests.isNotEmpty;
+
+    if (!hasAny) {
+      return ListView(
+        children: const [
+          SizedBox(height: 160),
+          Center(
+            child: Text(
+              'Нет активных запросов',
+              style: TextStyle(
+                color: Color(0xFF6F7479),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        if (incomingRequests.isNotEmpty) ...[
+          _OldWhatsSectionTitle(title: 'Входящие'),
+          ...incomingRequests.map((item) {
+            final request = Map<String, dynamic>.from(item as Map);
+            final requestId = request['id']?.toString() ?? '';
+            final name = request['requester_name']?.toString() ?? 'Пользователь';
+            final username = request['requester_username']?.toString() ?? '';
+            final avatarUrl = request['requester_avatar_url']?.toString();
+
+            return _RequestListTile(
+              green: green,
+              name: name,
+              username: username,
+              avatarUrl: avatarUrl,
+              onAccept: requestId.isEmpty ? null : () => onAccept(requestId),
+              onDecline: requestId.isEmpty ? null : () => onDecline(requestId),
+            );
+          }),
+        ],
+        if (outgoingRequests.isNotEmpty) ...[
+          _OldWhatsSectionTitle(title: 'Исходящие'),
+          ...outgoingRequests.map((item) {
+            final request = Map<String, dynamic>.from(item as Map);
+            final requestId = request['id']?.toString() ?? '';
+            final name = request['receiver_name']?.toString() ?? 'Пользователь';
+            final username = request['receiver_username']?.toString() ?? '';
+            final avatarUrl = request['receiver_avatar_url']?.toString();
+
+            return _RequestListTile(
+              green: green,
+              name: name,
+              username: username.isEmpty ? 'ожидает ответа' : '@$username · ожидает ответа',
+              avatarUrl: avatarUrl,
+              onCancel: requestId.isEmpty ? null : () => onCancel(requestId),
+            );
+          }),
+        ],
+      ],
+    );
+  }
+}
+
+class _OldWhatsSectionTitle extends StatelessWidget {
+  final String title;
+
+  const _OldWhatsSectionTitle({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFEFEFEF),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Text(
+        title.toUpperCase(),
+        style: const TextStyle(
+          color: Color(0xFF6F7479),
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.7,
+        ),
+      ),
+    );
+  }
+}
+
+class _RequestListTile extends StatelessWidget {
+  final Color green;
+  final String name;
+  final String username;
+  final String? avatarUrl;
+  final VoidCallback? onAccept;
+  final VoidCallback? onDecline;
+  final VoidCallback? onCancel;
+
+  const _RequestListTile({
+    required this.green,
+    required this.name,
+    required this.username,
+    required this.avatarUrl,
+    this.onAccept,
+    this.onDecline,
+    this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
 
     return Material(
-      color: const Color(0xFFE8F5E9),
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: green,
-                foregroundColor: Colors.white,
-                child: const Icon(Icons.mark_email_unread_rounded, size: 21),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Запросы на чат',
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 9, 12, 0),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 27,
+              backgroundColor: const Color(0xFFE2F0EC),
+              backgroundImage: normalizedAvatar == null
+                  ? null
+                  : NetworkImage(ApiClient.absoluteUrl(normalizedAvatar)),
+              child: normalizedAvatar == null
+                  ? Text(
+                      name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
                       style: TextStyle(
-                        color: Color(0xFF202124),
+                        color: green,
                         fontWeight: FontWeight.w900,
-                        fontSize: 15.5,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.only(bottom: 12),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFFEAEAEA))),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF111111),
+                              fontSize: 16.2,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            username,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF6F7479),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      parts.join(' · '),
-                      style: const TextStyle(
-                        color: Color(0xFF5F6368),
-                        fontWeight: FontWeight.w600,
+                    if (onCancel != null)
+                      TextButton(
+                        onPressed: onCancel,
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFD32F2F),
+                        ),
+                        child: const Text('Отменить'),
                       ),
-                    ),
+                    if (onDecline != null)
+                      IconButton(
+                        onPressed: onDecline,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    if (onAccept != null)
+                      IconButton(
+                        onPressed: onAccept,
+                        color: green,
+                        icon: const Icon(Icons.check_rounded),
+                      ),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: green),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1033,6 +1260,7 @@ class _WhatsChatTile extends StatelessWidget {
   final String? avatarUrl;
   final bool isGroup;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _WhatsChatTile({
     required this.green,
@@ -1042,17 +1270,18 @@ class _WhatsChatTile extends StatelessWidget {
     required this.avatarUrl,
     required this.isGroup,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    final normalizedAvatar =
-        avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
+    final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
 
     return Material(
       color: Colors.white,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 9, 12, 0),
           child: Row(
@@ -1081,11 +1310,7 @@ class _WhatsChatTile extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.only(bottom: 12),
                   decoration: const BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: Color(0xFFEAEAEA),
-                      ),
-                    ),
+                    border: Border(bottom: BorderSide(color: Color(0xFFEAEAEA))),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1131,41 +1356,15 @@ class _WhatsChatTile extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          if (time.isNotEmpty)
-                            Text(
-                              time,
-                              style: TextStyle(
-                                color: green,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            )
-                          else
-                            const SizedBox(height: 14),
-                          const SizedBox(height: 9),
-                          if (isGroup)
-                            Container(
-                              width: 20,
-                              height: 20,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF25D366),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: const Text(
-                                'G',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+                      if (time.isNotEmpty)
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: green,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1181,10 +1380,12 @@ class _WhatsChatTile extends StatelessWidget {
 class _WhatsEmptyChats extends StatelessWidget {
   final Color green;
   final VoidCallback onFind;
+  final String message;
 
   const _WhatsEmptyChats({
     required this.green,
     required this.onFind,
+    required this.message,
   });
 
   @override
@@ -1204,9 +1405,9 @@ class _WhatsEmptyChats extends StatelessWidget {
                 child: const Icon(Icons.forum_rounded, size: 38),
               ),
               const SizedBox(height: 18),
-              const Text(
-                'Пока нет чатов',
-                style: TextStyle(
+              Text(
+                message,
+                style: const TextStyle(
                   color: Color(0xFF111111),
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
@@ -1214,7 +1415,7 @@ class _WhatsEmptyChats extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Найдите пользователя и отправьте запрос на чат',
+                'Откройте меню и добавьте контакт',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Color(0xFF6F7479),
@@ -1229,7 +1430,7 @@ class _WhatsEmptyChats extends StatelessWidget {
                   foregroundColor: Colors.white,
                 ),
                 icon: const Icon(Icons.person_search_rounded),
-                label: const Text('Найти пользователя'),
+                label: const Text('Добавить контакт'),
               ),
             ],
           ),
@@ -1242,94 +1443,98 @@ class _WhatsEmptyChats extends StatelessWidget {
 class _MobileSideMenu extends StatelessWidget {
   final String name;
   final Color accent;
-  final int incomingCount;
-  final int outgoingCount;
   final bool notificationsEnabled;
   final VoidCallback onFindUser;
   final VoidCallback onCreateGroup;
-  final VoidCallback onRequests;
   final VoidCallback onSettings;
   final VoidCallback onRefresh;
   final VoidCallback onEnablePush;
+  final VoidCallback onLogout;
 
   const _MobileSideMenu({
     required this.name,
     required this.accent,
-    required this.incomingCount,
-    required this.outgoingCount,
     required this.notificationsEnabled,
     required this.onFindUser,
     required this.onCreateGroup,
-    required this.onRequests,
     required this.onSettings,
     required this.onRefresh,
     required this.onEnablePush,
+    required this.onLogout,
   });
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
-    final panelWidth = width < 420 ? width * 0.86 : 338.0;
+    final panelWidth = width < 430 ? width * 0.82 : 330.0;
 
     return Container(
       width: panelWidth,
       height: double.infinity,
-      color: const Color(0xFF17212B),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8F8F8),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 22,
+            offset: Offset(-8, 0),
+          ),
+        ],
+      ),
       child: SafeArea(
-        right: false,
+        left: false,
         child: Column(
           children: [
-            _MobileSideProfileHeader(
-              name: name,
-              accent: accent,
-            ),
+            _MobileSideProfileHeader(name: name, accent: accent),
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  _MobileSideAccountTile(
-                    name: name,
-                    accent: accent,
-                    selected: true,
-                  ),
                   _MobileSideMenuItem(
-                    icon: Icons.add_circle_rounded,
+                    icon: Icons.person_add_alt_1_rounded,
                     title: 'Добавить контакт',
+                    subtitle: 'Найти пользователя',
                     onTap: onFindUser,
-                    iconColor: const Color(0xFF62A8EA),
-                  ),
-                  const _MobileSideDivider(),
-                  _MobileSideMenuItem(
-                    icon: Icons.person_outline_rounded,
-                    title: 'Мой профиль',
-                    onTap: onSettings,
+                    accent: accent,
                   ),
                   _MobileSideMenuItem(
                     icon: Icons.group_add_rounded,
                     title: 'Создать группу',
+                    subtitle: 'Новый групповой чат',
                     onTap: onCreateGroup,
-                  ),
-                  _MobileSideMenuItem(
-                    icon: Icons.mark_email_unread_rounded,
-                    title: 'Запросы',
-                    badge: incomingCount > 0 ? incomingCount.toString() : null,
-                    onTap: onRequests,
+                    accent: accent,
                   ),
                   if (!notificationsEnabled)
                     _MobileSideMenuItem(
                       icon: Icons.notifications_active_rounded,
                       title: 'Включить Push',
+                      subtitle: 'Уведомления о сообщениях',
                       onTap: onEnablePush,
+                      accent: accent,
                     ),
+                  const _MobileSideDivider(),
                   _MobileSideMenuItem(
                     icon: Icons.settings_rounded,
                     title: 'Настройки',
+                    subtitle: 'Профиль, внешний вид, уведомления',
                     onTap: onSettings,
+                    accent: accent,
                   ),
                   _MobileSideMenuItem(
                     icon: Icons.refresh_rounded,
                     title: 'Обновить',
+                    subtitle: 'Перезагрузить чаты',
                     onTap: onRefresh,
+                    accent: accent,
+                  ),
+                  const _MobileSideDivider(),
+                  _MobileSideMenuItem(
+                    icon: Icons.logout_rounded,
+                    title: 'Выйти из аккаунта',
+                    subtitle: 'Завершить текущую сессию',
+                    onTap: onLogout,
+                    accent: const Color(0xFFD32F2F),
+                    danger: true,
                   ),
                 ],
               ),
@@ -1340,7 +1545,7 @@ class _MobileSideMenu extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.lock_outline_rounded,
-                    color: Colors.white.withValues(alpha: 0.45),
+                    color: Colors.black.withValues(alpha: 0.42),
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -1350,7 +1555,7 @@ class _MobileSideMenu extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
+                        color: Colors.black.withValues(alpha: 0.42),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1378,43 +1583,35 @@ class _MobileSideProfileHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
       decoration: const BoxDecoration(
-        color: Color(0xFF17212B),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF075E54), Color(0xFF128C7E)],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CircleAvatar(
             radius: 33,
-            backgroundColor: accent,
-            foregroundColor: Colors.white,
+            backgroundColor: Colors.white,
+            foregroundColor: accent,
             child: Text(
               name.isNotEmpty ? name.characters.first.toUpperCase() : 'U',
-              style: const TextStyle(
-                fontSize: 25,
-                fontWeight: FontWeight.w900,
-              ),
+              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 13),
           Text(
             name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Сменить UMe-статус',
-            style: TextStyle(
-              color: Color(0xFF6AB3F3),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -1423,106 +1620,79 @@ class _MobileSideProfileHeader extends StatelessWidget {
   }
 }
 
-class _MobileSideAccountTile extends StatelessWidget {
-  final String name;
-  final Color accent;
-  final bool selected;
-
-  const _MobileSideAccountTile({
-    required this.name,
-    required this.accent,
-    required this.selected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-      leading: CircleAvatar(
-        radius: 19,
-        backgroundColor: accent.withValues(alpha: 0.22),
-        foregroundColor: Colors.white,
-        child: Text(
-          name.isNotEmpty ? name.characters.first.toUpperCase() : 'U',
-          style: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-      ),
-      title: Text(
-        name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      trailing: selected
-          ? Icon(
-              Icons.check_rounded,
-              color: accent,
-            )
-          : null,
-    );
-  }
-}
-
 class _MobileSideMenuItem extends StatelessWidget {
   final IconData icon;
   final String title;
+  final String subtitle;
   final VoidCallback onTap;
-  final String? badge;
-  final Color? iconColor;
+  final Color accent;
+  final bool danger;
 
   const _MobileSideMenuItem({
     required this.icon,
     required this.title,
+    required this.subtitle,
     required this.onTap,
-    this.badge,
-    this.iconColor,
+    required this.accent,
+    this.danger = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 18, 12),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              color: iconColor ?? Colors.white.withValues(alpha: 0.82),
-              size: 24,
-            ),
-            const SizedBox(width: 22),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            if (badge != null)
+    final titleColor = danger ? const Color(0xFFD32F2F) : const Color(0xFF111111);
+    final subtitleColor = danger
+        ? const Color(0xFFD32F2F).withValues(alpha: 0.72)
+        : const Color(0xFF6F7479);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 11, 16, 11),
+          child: Row(
+            children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF54A9EB),
+                  color: accent.withValues(alpha: danger ? 0.10 : 0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text(
-                  badge!,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                  ),
+                child: Icon(icon, color: accent, size: 23),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: titleColor,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: subtitleColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-          ],
+              Icon(Icons.chevron_right_rounded, color: Colors.black.withValues(alpha: 0.25)),
+            ],
+          ),
         ),
       ),
     );
@@ -1537,7 +1707,7 @@ class _MobileSideDivider extends StatelessWidget {
     return Container(
       height: 1,
       margin: const EdgeInsets.symmetric(vertical: 8),
-      color: Colors.black.withValues(alpha: 0.18),
+      color: const Color(0xFFE4E4E4),
     );
   }
 }
@@ -1795,185 +1965,3 @@ class _UserSearchSheetState extends State<_UserSearchSheet> {
   }
 }
 
-class _ChatRequestsSheet extends StatelessWidget {
-  final Color accent;
-  final List<dynamic> incomingRequests;
-  final List<dynamic> outgoingRequests;
-  final Future<void> Function(String requestId) onAccept;
-  final Future<void> Function(String requestId) onDecline;
-
-  const _ChatRequestsSheet({
-    required this.accent,
-    required this.incomingRequests,
-    required this.outgoingRequests,
-    required this.onAccept,
-    required this.onDecline,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasAny = incomingRequests.isNotEmpty || outgoingRequests.isNotEmpty;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 8, 16, bottom + 16),
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.75,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Запросы на чат',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              if (!hasAny)
-                const Expanded(
-                  child: Center(
-                    child: Text('Нет активных запросов'),
-                  ),
-                )
-              else
-                Expanded(
-                  child: ListView(
-                    children: [
-                      if (incomingRequests.isNotEmpty) ...[
-                        Text(
-                          'Входящие',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        ...incomingRequests.map((item) {
-                          final request = Map<String, dynamic>.from(
-                            item as Map,
-                          );
-
-                          final requestId = request['id']?.toString() ?? '';
-                          final name =
-                              request['requester_name']?.toString() ??
-                                  'Пользователь';
-                          final username =
-                              request['requester_username']?.toString() ?? '';
-                          final avatarUrl =
-                              request['requester_avatar_url']?.toString();
-
-                          return Card(
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: accent.withValues(alpha: 0.16),
-                                backgroundImage:
-                                    avatarUrl == null || avatarUrl.isEmpty
-                                        ? null
-                                        : NetworkImage(
-                                            ApiClient.absoluteUrl(avatarUrl),
-                                          ),
-                                child: avatarUrl == null || avatarUrl.isEmpty
-                                    ? Text(
-                                        name.isNotEmpty
-                                            ? name.characters.first
-                                                .toUpperCase()
-                                            : '?',
-                                        style: TextStyle(
-                                          color: accent,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      )
-                                    : null,
-                              ),
-                              title: Text(name),
-                              subtitle:
-                                  username.isEmpty ? null : Text('@$username'),
-                              trailing: Wrap(
-                                spacing: 8,
-                                children: [
-                                  IconButton.filledTonal(
-                                    tooltip: 'Отклонить',
-                                    onPressed: requestId.isEmpty
-                                        ? null
-                                        : () => onDecline(requestId),
-                                    icon: const Icon(Icons.close),
-                                  ),
-                                  IconButton.filled(
-                                    tooltip: 'Принять',
-                                    onPressed: requestId.isEmpty
-                                        ? null
-                                        : () => onAccept(requestId),
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: accent,
-                                      foregroundColor: accent.computeLuminance() > 0.55
-                                          ? Colors.black
-                                          : Colors.white,
-                                    ),
-                                    icon: const Icon(Icons.check),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                        const SizedBox(height: 16),
-                      ],
-                      if (outgoingRequests.isNotEmpty) ...[
-                        Text(
-                          'Исходящие',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        ...outgoingRequests.map((item) {
-                          final request = Map<String, dynamic>.from(
-                            item as Map,
-                          );
-
-                          final name = request['receiver_name']?.toString() ??
-                              'Пользователь';
-                          final username =
-                              request['receiver_username']?.toString() ?? '';
-                          final avatarUrl =
-                              request['receiver_avatar_url']?.toString();
-
-                          return Card(
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: accent.withValues(alpha: 0.16),
-                                backgroundImage:
-                                    avatarUrl == null || avatarUrl.isEmpty
-                                        ? null
-                                        : NetworkImage(
-                                            ApiClient.absoluteUrl(avatarUrl),
-                                          ),
-                                child: avatarUrl == null || avatarUrl.isEmpty
-                                    ? Text(
-                                        name.isNotEmpty
-                                            ? name.characters.first
-                                                .toUpperCase()
-                                            : '?',
-                                        style: TextStyle(
-                                          color: accent,
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      )
-                                    : null,
-                              ),
-                              title: Text(name),
-                              subtitle: Text(
-                                username.isEmpty
-                                    ? 'Ожидает ответа'
-                                    : '@$username · ожидает ответа',
-                              ),
-                              trailing: Icon(Icons.schedule, color: accent),
-                            ),
-                          );
-                        }),
-                      ],
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

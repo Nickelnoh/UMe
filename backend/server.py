@@ -1167,10 +1167,6 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         last_msg.text AS last_message_text,
                         last_msg.message_type AS last_message_type,
                         last_msg.created_at AS last_message_created_at,
-                        last_msg.sender_user_id AS last_message_sender_user_id,
-                        last_msg.sender_username AS last_message_sender_username,
-                        last_msg.sender_nickname AS last_message_sender_nickname,
-                        last_msg.sender_display_name AS last_message_sender_display_name,
                         member_count.count AS member_count
                     FROM public.chat_members cm
                     JOIN public.chats c
@@ -1190,14 +1186,8 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         SELECT
                             m.text,
                             m.message_type,
-                            m.created_at,
-                            m.sender_user_id,
-                            sender.username AS sender_username,
-                            sender.nickname AS sender_nickname,
-                            sender.display_name AS sender_display_name
+                            m.created_at
                         FROM public.messages m
-                        JOIN public.users sender
-                          ON sender.id = m.sender_user_id
                         WHERE m.chat_id = c.id
                           AND m.deleted_at IS NULL
                         ORDER BY m.created_at DESC
@@ -1246,10 +1236,6 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         "avatar_url": avatar_url,
                         "last_message_text": last_message_text,
                         "last_message_type": row["last_message_type"],
-                        "last_message_sender_user_id": row["last_message_sender_user_id"],
-                        "last_message_sender_name": row["last_message_sender_display_name"]
-                        or row["last_message_sender_nickname"]
-                        or row["last_message_sender_username"],
                         "last_message_created_at": row["last_message_created_at"].isoformat()
                         if row["last_message_created_at"]
                         else None,
@@ -1804,6 +1790,106 @@ async def leave_group_chat(
     return {"ok": True}
 
 
+@app.post("/chats/{chat_id}/delete")
+async def delete_chat_for_me(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    current_time = now()
+    affected_user_ids = []
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.is_group, cm.id, cm.role
+            FROM public.chats c
+            JOIN public.chat_members cm ON cm.chat_id = c.id
+            WHERE c.id = $1
+              AND cm.user_id = $2
+              AND cm.hidden = false
+              AND cm.left_at IS NULL
+            """,
+            chat_id,
+            user_id,
+        )
+
+        if not row:
+            raise HTTPException(status_code=403, detail="Not a chat member")
+
+        if row["is_group"] and row["role"] == "owner":
+            other_owner = await conn.fetchval(
+                """
+                SELECT user_id
+                FROM public.chat_members
+                WHERE chat_id = $1
+                  AND user_id <> $2
+                  AND hidden = false
+                  AND left_at IS NULL
+                ORDER BY joined_at ASC
+                LIMIT 1
+                """,
+                chat_id,
+                user_id,
+            )
+
+            if other_owner:
+                await conn.execute(
+                    """
+                    UPDATE public.chat_members
+                    SET role = 'owner'
+                    WHERE chat_id = $1
+                      AND user_id = $2
+                    """,
+                    chat_id,
+                    other_owner,
+                )
+
+        affected_rows = await conn.fetch(
+            """
+            SELECT user_id
+            FROM public.chat_members
+            WHERE chat_id = $1
+              AND hidden = false
+              AND left_at IS NULL
+            """,
+            chat_id,
+        )
+        affected_user_ids = [r["user_id"] for r in affected_rows]
+
+        await conn.execute(
+            """
+            UPDATE public.chat_members
+            SET hidden = true,
+                left_at = $1
+            WHERE id = $2
+            """,
+            current_time,
+            row["id"],
+        )
+
+    await manager.send_to_user(
+        user_id,
+        {
+            "type": "chat.deleted",
+            "chat_id": chat_id,
+        },
+    )
+
+    for target_user_id in affected_user_ids:
+        if target_user_id == user_id:
+            continue
+
+        await manager.send_to_user(
+            target_user_id,
+            {
+                "type": "chat.members.updated",
+                "chat_id": chat_id,
+            },
+        )
+
+    return {"ok": True}
+
+
 @app.post("/chats/{chat_id}/title")
 async def update_group_title(
     chat_id: str,
@@ -2160,6 +2246,54 @@ async def list_outgoing_chat_requests(
         )
 
     return result
+
+
+@app.post("/chat-requests/{request_id}/cancel")
+async def cancel_chat_request(
+    request_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        request_row = await conn.fetchrow(
+            """
+            SELECT id, requester_user_id, receiver_user_id, status
+            FROM public.chat_requests
+            WHERE id = $1
+            """,
+            request_id,
+        )
+
+        if not request_row:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        if request_row["requester_user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Only requester can cancel request")
+
+        if request_row["status"] != "pending":
+            raise HTTPException(status_code=409, detail="Request is not pending")
+
+        await conn.execute(
+            """
+            UPDATE public.chat_requests
+            SET status = 'cancelled',
+                responded_at = $1
+            WHERE id = $2
+            """,
+            current_time,
+            request_id,
+        )
+
+    await manager.send_to_user(
+        request_row["receiver_user_id"],
+        {
+            "type": "chat_request.cancelled",
+            "request_id": request_id,
+        },
+    )
+
+    return {"ok": True}
 
 
 @app.post("/chat-requests/{request_id}/accept")
