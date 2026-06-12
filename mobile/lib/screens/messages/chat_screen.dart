@@ -48,6 +48,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _hasTextInput = false;
 
   DateTime? _recordingStartedAt;
+  Timer? _recordingTicker;
+  Duration _recordingElapsed = Duration.zero;
+  double _voiceLockProgress = 0.0;
 
   String? _myUserId;
   late String _title;
@@ -84,6 +87,28 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _hasTextInput = hasText;
     });
+  }
+
+  void _startRecordingTicker() {
+    _recordingTicker?.cancel();
+
+    _recordingTicker = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) {
+        final started = _recordingStartedAt;
+
+        if (!mounted || started == null || !_recording) return;
+
+        setState(() {
+          _recordingElapsed = DateTime.now().difference(started);
+        });
+      },
+    );
+  }
+
+  void _stopRecordingTicker() {
+    _recordingTicker?.cancel();
+    _recordingTicker = null;
   }
 
   Future<void> _loadMe() async {
@@ -471,13 +496,11 @@ class _ChatScreenState extends State<ChatScreen> {
         _recording = true;
         _recordLocked = locked;
         _recordingStartedAt = DateTime.now();
+        _recordingElapsed = Duration.zero;
+        _voiceLockProgress = locked ? 1.0 : 0.0;
       });
 
-      TopNotification.info(
-        context,
-        title: 'Запись',
-        message: 'Голосовое сообщение записывается',
-      );
+      _startRecordingTicker();
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -488,13 +511,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _recordLocked = true;
+      _voiceLockProgress = 1.0;
     });
-
-    TopNotification.info(
-      context,
-      title: 'Голосовое сообщение',
-      message: 'Автозапись включена. Нажмите микрофон ещё раз, чтобы отправить.',
-    );
   }
 
   Future<void> _handleMicLongPressStart(LongPressStartDetails details) async {
@@ -505,7 +523,15 @@ class _ChatScreenState extends State<ChatScreen> {
   void _handleMicLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
     if (!_recording || _recordLocked) return;
 
-    if (details.offsetFromOrigin.dy < -70) {
+    final progress = (-details.offsetFromOrigin.dy / 90).clamp(0.0, 1.0);
+
+    if (progress != _voiceLockProgress && mounted) {
+      setState(() {
+        _voiceLockProgress = progress;
+      });
+    }
+
+    if (progress >= 0.88) {
       _lockVoiceRecording();
     }
   }
@@ -520,26 +546,21 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (_recording && _recordLocked) {
       _stopVoiceRecordingAndSend();
-      return;
     }
-
-    if (_recording) return;
-
-    TopNotification.info(
-      context,
-      title: 'Голосовое сообщение',
-      message: 'Зажмите микрофон для записи. Потяните вверх, чтобы закрепить.',
-    );
   }
 
   Future<void> _stopVoiceRecordingAndSend() async {
     if (!_recording) return;
 
     try {
+      _stopRecordingTicker();
+
       setState(() {
         _recording = false;
         _recordLocked = false;
         _recordingStartedAt = null;
+        _recordingElapsed = Duration.zero;
+        _voiceLockProgress = 0.0;
         _sending = true;
       });
 
@@ -590,6 +611,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _recording = false;
           _recordLocked = false;
           _recordingStartedAt = null;
+          _recordingElapsed = Duration.zero;
+          _voiceLockProgress = 0.0;
           _sending = false;
         });
       }
@@ -600,6 +623,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!_recording) return;
 
     try {
+      _stopRecordingTicker();
+
       await _recordSubscription?.cancel();
       _recordSubscription = null;
       await _recorder.stop();
@@ -611,6 +636,8 @@ class _ChatScreenState extends State<ChatScreen> {
         _recording = false;
         _recordLocked = false;
         _recordingStartedAt = null;
+        _recordingElapsed = Duration.zero;
+        _voiceLockProgress = 0.0;
       });
 
       TopNotification.info(
@@ -1649,6 +1676,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.dispose();
     _wsSubscription?.cancel();
     _recordSubscription?.cancel();
+    _recordingTicker?.cancel();
     _recorder.dispose();
     _ws.dispose();
     super.dispose();
@@ -1784,7 +1812,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: _VoiceRecordingPanel(
                           accent: accent,
                           locked: _recordLocked,
-                          startedAt: _recordingStartedAt,
+                          elapsed: _recordingElapsed,
+                          lockProgress: _voiceLockProgress,
                           onLock: _lockVoiceRecording,
                           onCancel: _cancelVoiceRecording,
                         ),
@@ -1834,25 +1863,19 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         const SizedBox(width: 8),
                         if (_hasTextInput && !_recording)
-                          IconButton.filled(
-                            style: IconButton.styleFrom(
-                              backgroundColor: accent,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: _sending ? null : _sendTextMessage,
-                            icon: _sending
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.send_rounded),
+                          _RoundActionButton(
+                            accent: accent,
+                            disabled: _sending,
+                            icon: Icons.send_rounded,
+                            loading: _sending,
+                            onTap: _sendTextMessage,
                           )
                         else
                           _HoldToRecordButton(
                             accent: accent,
                             recording: _recording,
                             locked: _recordLocked,
+                            lockProgress: _voiceLockProgress,
                             disabled: _sending,
                             onTap: _handleMicTap,
                             onLongPressStart: _handleMicLongPressStart,
@@ -1876,23 +1899,21 @@ class _ChatScreenState extends State<ChatScreen> {
 class _VoiceRecordingPanel extends StatelessWidget {
   final Color accent;
   final bool locked;
-  final DateTime? startedAt;
+  final Duration elapsed;
+  final double lockProgress;
   final VoidCallback onLock;
   final VoidCallback onCancel;
 
   const _VoiceRecordingPanel({
     required this.accent,
     required this.locked,
-    required this.startedAt,
+    required this.elapsed,
+    required this.lockProgress,
     required this.onLock,
     required this.onCancel,
   });
 
   String _elapsedText() {
-    final started = startedAt;
-    if (started == null) return '00:00';
-
-    final elapsed = DateTime.now().difference(started);
     final minutes = elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
@@ -1904,24 +1925,34 @@ class _VoiceRecordingPanel extends StatelessWidget {
     final panelColor = isDark ? const Color(0xFF1F2C34) : const Color(0xFFE8F5E9);
     final textColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
     final subColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF5F6368);
+    final progress = lockProgress.clamp(0.0, 1.0);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
       decoration: BoxDecoration(
         color: panelColor,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: accent.withValues(alpha: locked ? 0.36 : 0.18),
+          color: accent.withValues(alpha: locked ? 0.40 : 0.18 + progress * 0.22),
         ),
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: locked ? accent : Colors.redAccent,
-            foregroundColor: Colors.white,
-            child: Icon(locked ? Icons.lock_rounded : Icons.mic_rounded, size: 20),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: locked ? accent : Color.lerp(Colors.redAccent, accent, progress),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              locked ? Icons.lock_rounded : Icons.mic_rounded,
+              color: Colors.white,
+              size: 21,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1941,7 +1972,7 @@ class _VoiceRecordingPanel extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   locked
-                      ? '${_elapsedText()} · нажмите микрофон ещё раз, чтобы отправить'
+                      ? '${_elapsedText()} · нажмите микрофон, чтобы отправить'
                       : '${_elapsedText()} · отпустите для отправки или потяните вверх',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1973,10 +2004,59 @@ class _VoiceRecordingPanel extends StatelessWidget {
   }
 }
 
+class _RoundActionButton extends StatelessWidget {
+  final Color accent;
+  final IconData icon;
+  final bool disabled;
+  final bool loading;
+  final VoidCallback onTap;
+
+  const _RoundActionButton({
+    required this.accent,
+    required this.icon,
+    required this.disabled,
+    required this.loading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: disabled ? accent.withValues(alpha: 0.45) : accent,
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: loading
+              ? const SizedBox(
+                  width: 19,
+                  height: 19,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: Colors.white,
+                  ),
+                )
+              : Icon(
+                  icon,
+                  color: Colors.white,
+                  size: 25,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HoldToRecordButton extends StatelessWidget {
   final Color accent;
   final bool recording;
   final bool locked;
+  final double lockProgress;
   final bool disabled;
   final VoidCallback onTap;
   final GestureLongPressStartCallback onLongPressStart;
@@ -1987,6 +2067,7 @@ class _HoldToRecordButton extends StatelessWidget {
     required this.accent,
     required this.recording,
     required this.locked,
+    required this.lockProgress,
     required this.disabled,
     required this.onTap,
     required this.onLongPressStart,
@@ -1996,40 +2077,87 @@ class _HoldToRecordButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final progress = lockProgress.clamp(0.0, 1.0);
     final color = recording ? (locked ? accent : Colors.redAccent) : accent;
+    final scale = recording ? 1.08 : 1.0;
 
-    return GestureDetector(
-      onTap: disabled ? null : onTap,
-      onLongPressStart: disabled ? null : onLongPressStart,
-      onLongPressMoveUpdate: disabled ? null : onLongPressMoveUpdate,
-      onLongPressEnd: disabled ? null : onLongPressEnd,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: disabled ? color.withValues(alpha: 0.45) : color,
-          shape: BoxShape.circle,
-          boxShadow: [
-            if (recording)
-              BoxShadow(
-                color: Colors.redAccent.withValues(alpha: 0.32),
-                blurRadius: 18,
-                spreadRadius: 2,
+    return SizedBox(
+      width: 58,
+      height: 96,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.bottomCenter,
+        children: [
+          Positioned(
+            bottom: 56 + 42 * progress,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 120),
+                opacity: recording && !locked ? (0.28 + progress * 0.72) : 0.0,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: progress >= 0.88 ? accent : const Color(0xFF1F2C34),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    progress >= 0.88 ? Icons.lock_rounded : Icons.keyboard_arrow_up_rounded,
+                    color: Colors.white,
+                    size: 25,
+                  ),
+                ),
               ),
-          ],
-        ),
-        child: Icon(
-          recording
-              ? (locked ? Icons.mic_rounded : Icons.keyboard_voice_rounded)
-              : Icons.mic_none_rounded,
-          color: Colors.white,
-        ),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            child: GestureDetector(
+              onTap: disabled ? null : onTap,
+              onLongPressStart: disabled ? null : onLongPressStart,
+              onLongPressMoveUpdate: disabled ? null : onLongPressMoveUpdate,
+              onLongPressEnd: disabled ? null : onLongPressEnd,
+              child: AnimatedScale(
+                duration: const Duration(milliseconds: 140),
+                scale: scale,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: disabled ? color.withValues(alpha: 0.45) : color,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      if (recording)
+                        BoxShadow(
+                          color: color.withValues(alpha: 0.38),
+                          blurRadius: 18,
+                          spreadRadius: 2,
+                        ),
+                    ],
+                  ),
+                  child: Icon(
+                    recording ? Icons.mic_rounded : Icons.mic_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
-
 
 class _GroupInfoSheet extends StatelessWidget {
   final String title;

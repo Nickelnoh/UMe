@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -392,6 +393,12 @@ class _AttachmentPreview extends StatelessWidget {
         url: url,
         name: name,
         textColor: textColor,
+        sizeBytes: int.tryParse(
+          attachment['size_bytes']?.toString() ??
+              attachment['file_size']?.toString() ??
+              attachment['size']?.toString() ??
+              '',
+        ),
       );
     }
 
@@ -429,11 +436,13 @@ class _AudioPlayerCard extends StatefulWidget {
   final String url;
   final String name;
   final Color textColor;
+  final int? sizeBytes;
 
   const _AudioPlayerCard({
     required this.url,
     required this.name,
     required this.textColor,
+    required this.sizeBytes,
   });
 
   @override
@@ -444,12 +453,20 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
   final AudioPlayer _player = AudioPlayer();
 
   bool _isPlaying = false;
+  bool _sourceReady = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
 
   @override
   void initState() {
     super.initState();
+
+    final estimated = _estimateWavDuration();
+    if (estimated != null) {
+      _duration = estimated;
+    }
+
+    unawaited(_prepareSource());
 
     _player.onDurationChanged.listen((duration) {
       if (!mounted) return;
@@ -470,6 +487,45 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
     });
   }
 
+  Duration? _estimateWavDuration() {
+    final size = widget.sizeBytes;
+
+    if (size == null || size <= 44) return null;
+    if (!widget.name.toLowerCase().endsWith('.wav')) return null;
+
+    const sampleRate = 16000;
+    const channels = 1;
+    const bytesPerSample = 2;
+    const byteRate = sampleRate * channels * bytesPerSample;
+
+    final audioBytes = size - 44;
+    final milliseconds = (audioBytes / byteRate * 1000).round();
+
+    if (milliseconds <= 0) return null;
+
+    return Duration(milliseconds: milliseconds);
+  }
+
+  Future<void> _prepareSource() async {
+    if (_sourceReady) return;
+
+    try {
+      await _player.setSource(UrlSource(widget.url));
+      final duration = await _player.getDuration();
+
+      if (!mounted) return;
+
+      setState(() {
+        _sourceReady = true;
+        if (duration != null) {
+          _duration = duration;
+        }
+      });
+    } catch (_) {
+      // Duration can still arrive through onDurationChanged after playback starts.
+    }
+  }
+
   Future<void> _toggle() async {
     if (_isPlaying) {
       await _player.pause();
@@ -477,8 +533,24 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
       return;
     }
 
-    await _player.play(UrlSource(widget.url));
-    setState(() => _isPlaying = true);
+    await _prepareSource();
+
+    try {
+      await _player.resume();
+    } catch (_) {
+      await _player.play(UrlSource(widget.url));
+    }
+
+    final duration = await _player.getDuration();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isPlaying = true;
+      if (duration != null) {
+        _duration = duration;
+      }
+    });
   }
 
   Future<void> _seek(double value) async {
