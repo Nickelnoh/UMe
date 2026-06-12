@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -281,6 +282,75 @@ class _ChatsScreenState extends State<ChatsScreen> {
     TopNotification.success(
       context,
       message: 'Чаты обновлены',
+    );
+  }
+
+  Future<void> _openMobileSideMenu() async {
+    final accent = _accentColorValue();
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Меню',
+      barrierColor: Colors.black.withValues(alpha: 0.42),
+      transitionDuration: const Duration(milliseconds: 230),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Material(
+            color: Colors.transparent,
+            child: _MobileSideMenu(
+              name: _myName.isNotEmpty ? _myName : 'UMe user',
+              accent: accent,
+              incomingCount: _incomingRequests.length,
+              outgoingCount: _outgoingRequests.length,
+              notificationsEnabled: _notificationsEnabled,
+              refreshing: _refreshing,
+              onFindUser: () {
+                Navigator.of(dialogContext).pop();
+                _openSearchUsers();
+              },
+              onCreateGroup: () {
+                Navigator.of(dialogContext).pop();
+                _openCreateGroup();
+              },
+              onRequests: () {
+                Navigator.of(dialogContext).pop();
+                _openRequests();
+              },
+              onSettings: () {
+                Navigator.of(dialogContext).pop();
+                _openSettings();
+              },
+              onRefresh: () {
+                Navigator.of(dialogContext).pop();
+                _refresh();
+              },
+              onEnablePush: () {
+                Navigator.of(dialogContext).pop();
+                _enablePushNotifications();
+              },
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(-1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: FadeTransition(
+            opacity: curved,
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -607,6 +677,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Меню',
+          onPressed: _openMobileSideMenu,
+          icon: const Icon(Icons.menu_rounded),
+        ),
+        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -629,78 +705,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
         backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.68),
         foregroundColor: Theme.of(context).colorScheme.onSurface,
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Меню',
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) async {
-              switch (value) {
-                case 'group':
-                  await _openCreateGroup();
-                  break;
-                case 'requests':
-                  await _openRequests();
-                  break;
-                case 'notifications':
-                  await _enablePushNotifications();
-                  break;
-                case 'settings':
-                  await _openSettings();
-                  break;
-                case 'refresh':
-                  await _refresh();
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'group',
-                child: ListTile(
-                  leading: Icon(Icons.group_add_outlined),
-                  title: Text('Создать группу'),
-                  dense: true,
-                ),
-              ),
-              PopupMenuItem(
-                value: 'requests',
-                child: ListTile(
-                  leading: Badge(
-                    isLabelVisible: incomingCount > 0,
-                    label: Text(incomingCount.toString()),
-                    child: const Icon(Icons.mark_email_unread_outlined),
-                  ),
-                  title: const Text('Запросы'),
-                  dense: true,
-                ),
-              ),
-              if (!_notificationsEnabled)
-                const PopupMenuItem(
-                  value: 'notifications',
-                  child: ListTile(
-                    leading: Icon(Icons.notifications_active_outlined),
-                    title: Text('Включить уведомления'),
-                    dense: true,
-                  ),
-                ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings_outlined),
-                  title: Text('Настройки'),
-                  dense: true,
-                ),
-              ),
-              PopupMenuItem(
-                value: 'refresh',
-                enabled: !_refreshing,
-                child: const ListTile(
-                  leading: Icon(Icons.refresh),
-                  title: Text('Обновить'),
-                  dense: true,
-                ),
-              ),
-            ],
+          IconButton(
+            tooltip: 'Поиск',
+            onPressed: _openSearchUsers,
+            icon: const Icon(Icons.search_rounded),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -1703,3 +1713,394 @@ class _ChatRequestsSheet extends StatelessWidget {
     );
   }
 }
+
+
+class _MobileSideMenu extends StatelessWidget {
+  final String name;
+  final Color accent;
+  final int incomingCount;
+  final int outgoingCount;
+  final bool notificationsEnabled;
+  final bool refreshing;
+
+  final VoidCallback onFindUser;
+  final VoidCallback onCreateGroup;
+  final VoidCallback onRequests;
+  final VoidCallback onSettings;
+  final VoidCallback onRefresh;
+  final VoidCallback onEnablePush;
+
+  const _MobileSideMenu({
+    required this.name,
+    required this.accent,
+    required this.incomingCount,
+    required this.outgoingCount,
+    required this.notificationsEnabled,
+    required this.refreshing,
+    required this.onFindUser,
+    required this.onCreateGroup,
+    required this.onRequests,
+    required this.onSettings,
+    required this.onRefresh,
+    required this.onEnablePush,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final width = MediaQuery.of(context).size.width;
+    final panelWidth = width < 430 ? width * 0.86 : 350.0;
+    final isDark = theme.brightness == Brightness.dark;
+    final surface = isDark ? const Color(0xFF101923) : const Color(0xFFF7FAFC);
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.horizontal(
+        right: Radius.circular(28),
+      ),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(
+          sigmaX: 18,
+          sigmaY: 18,
+        ),
+        child: Container(
+          width: panelWidth,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            color: surface.withValues(alpha: 0.985),
+            border: Border(
+              right: BorderSide(
+                color: accent.withValues(alpha: 0.22),
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.34),
+                blurRadius: 34,
+                offset: const Offset(14, 0),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            right: false,
+            child: Column(
+              children: [
+                _MobileSideHeader(
+                  name: name,
+                  accent: accent,
+                  notificationsEnabled: notificationsEnabled,
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _MobileAccountTile(
+                        name: name,
+                        accent: accent,
+                        selected: true,
+                      ),
+                      _MobileMenuItem(
+                        icon: Icons.add_circle_outline_rounded,
+                        title: 'Добавить контакт',
+                        subtitle: 'найти пользователя и начать чат',
+                        onTap: onFindUser,
+                      ),
+                      const _MobileMenuDivider(),
+                      _MobileMenuItem(
+                        icon: Icons.group_add_rounded,
+                        title: 'Создать группу',
+                        subtitle: 'новый групповой чат',
+                        onTap: onCreateGroup,
+                      ),
+                      _MobileMenuItem(
+                        icon: Icons.mark_email_unread_rounded,
+                        title: 'Запросы',
+                        subtitle: _requestsSubtitle(),
+                        badge: incomingCount > 0 ? incomingCount.toString() : null,
+                        onTap: onRequests,
+                      ),
+                      if (!notificationsEnabled)
+                        _MobileMenuItem(
+                          icon: Icons.notifications_active_rounded,
+                          title: 'Включить Push',
+                          subtitle: 'уведомления о сообщениях',
+                          onTap: onEnablePush,
+                        ),
+                      const _MobileMenuDivider(),
+                      _MobileMenuItem(
+                        icon: Icons.person_outline_rounded,
+                        title: 'Мой профиль',
+                        subtitle: 'имя, аватар и статус',
+                        onTap: onSettings,
+                      ),
+                      _MobileMenuItem(
+                        icon: Icons.settings_rounded,
+                        title: 'Настройки',
+                        subtitle: 'тема и внешний вид',
+                        onTap: onSettings,
+                      ),
+                      _MobileMenuItem(
+                        icon: Icons.refresh_rounded,
+                        title: refreshing ? 'Обновление...' : 'Обновить',
+                        subtitle: 'перезагрузить список чатов',
+                        onTap: refreshing ? null : onRefresh,
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.lock_outline_rounded,
+                        size: 17,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.50),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'UMe private messenger',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.50),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _requestsSubtitle() {
+    if (incomingCount > 0 && outgoingCount > 0) {
+      return 'входящие: $incomingCount · исходящие: $outgoingCount';
+    }
+
+    if (incomingCount > 0) {
+      return 'входящие: $incomingCount';
+    }
+
+    if (outgoingCount > 0) {
+      return 'исходящие: $outgoingCount';
+    }
+
+    return 'нет активных запросов';
+  }
+}
+
+class _MobileSideHeader extends StatelessWidget {
+  final String name;
+  final Color accent;
+  final bool notificationsEnabled;
+
+  const _MobileSideHeader({
+    required this.name,
+    required this.accent,
+    required this.notificationsEnabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accent.withValues(alpha: 0.96),
+            accent.withValues(alpha: 0.68),
+            const Color(0xFF0F172A),
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 34,
+            backgroundColor: Colors.white.withValues(alpha: 0.20),
+            foregroundColor: Colors.white,
+            child: Text(
+              name.isNotEmpty ? name.characters.first.toUpperCase() : 'U',
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            notificationsEnabled ? 'Push-уведомления включены' : 'Push-уведомления не включены',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.78),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileAccountTile extends StatelessWidget {
+  final String name;
+  final Color accent;
+  final bool selected;
+
+  const _MobileAccountTile({
+    required this.name,
+    required this.accent,
+    required this.selected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+      leading: CircleAvatar(
+        backgroundColor: accent.withValues(alpha: 0.17),
+        foregroundColor: accent,
+        child: Text(
+          name.isNotEmpty ? name.characters.first.toUpperCase() : 'U',
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+      ),
+      title: Text(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+      subtitle: const Text('текущий аккаунт'),
+      trailing: selected
+          ? Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                color: accent,
+                shape: BoxShape.circle,
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+class _MobileMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final VoidCallback? onTap;
+
+  const _MobileMenuItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.badge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final disabled = onTap == null;
+    final accent = theme.colorScheme.primary;
+    final textColor = theme.colorScheme.onSurface.withValues(alpha: disabled ? 0.38 : 0.90);
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 8, 14, 8),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 25,
+              color: theme.colorScheme.onSurface.withValues(alpha: disabled ? 0.32 : 0.82),
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: textColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: disabled ? 0.28 : 0.54),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (badge != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: accent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  badge!,
+                  style: TextStyle(
+                    color: accent.computeLuminance() > 0.55 ? Colors.black : Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileMenuDivider extends StatelessWidget {
+  const _MobileMenuDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 18,
+      thickness: 1,
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08),
+    );
+  }
+}
+
+
