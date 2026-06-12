@@ -876,11 +876,7 @@ class _WhatsTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [green, const Color(0xFF128C7E)],
-        ),
+        color: green,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.22),
@@ -946,6 +942,7 @@ class _WhatsTopBar extends StatelessWidget {
                       title: 'ЧАТЫ',
                       active: selectedTab == _ChatsTab.chats,
                       badge: chatsCount,
+                      green: green,
                       onTap: onChats,
                     ),
                   ),
@@ -954,6 +951,7 @@ class _WhatsTopBar extends StatelessWidget {
                       title: 'ЗАПРОСЫ',
                       active: selectedTab == _ChatsTab.requests,
                       badge: incomingCount,
+                      green: green,
                       onTap: onRequests,
                     ),
                   ),
@@ -962,6 +960,7 @@ class _WhatsTopBar extends StatelessWidget {
                       title: 'ГРУППЫ',
                       active: selectedTab == _ChatsTab.groups,
                       badge: 0,
+                      green: green,
                       onTap: onGroups,
                     ),
                   ),
@@ -979,12 +978,14 @@ class _WhatsTab extends StatelessWidget {
   final String title;
   final bool active;
   final int badge;
+  final Color green;
   final VoidCallback onTap;
 
   const _WhatsTab({
     required this.title,
     required this.active,
     required this.badge,
+    required this.green,
     required this.onTap,
   });
 
@@ -1018,7 +1019,7 @@ class _WhatsTab extends StatelessWidget {
                     child: Text(
                       badge > 99 ? '99+' : badge.toString(),
                       style: TextStyle(
-                        color: active ? const Color(0xFF075E54) : Colors.white,
+                        color: active ? green : Colors.white,
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
                       ),
@@ -1614,12 +1615,8 @@ class _MobileSideProfileHeader extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF075E54), Color(0xFF128C7E)],
-        ),
+      decoration: BoxDecoration(
+        color: accent,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
