@@ -7,6 +7,7 @@ import mimetypes
 import asyncio
 import urllib.request
 import urllib.error
+from urllib.parse import quote
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Set
@@ -24,6 +25,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -72,6 +74,9 @@ class ConnectionManager:
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
         self.connections.setdefault(user_id, set()).add(websocket)
+
+    def is_online(self, user_id: str) -> bool:
+        return bool(self.connections.get(user_id))
 
     def disconnect(self, user_id: str, websocket: WebSocket):
         if user_id in self.connections:
@@ -277,7 +282,7 @@ def detect_attachment_kind(mime_type: str) -> str:
 
 
 def attachment_url(storage_key: str) -> str:
-    return f"/uploads/{storage_key}"
+    return f"/attachments/file/{quote(storage_key, safe='/')}"
 
 
 def safe_filename(original_name: str) -> str:
@@ -424,6 +429,86 @@ async def assert_chat_member(
         raise HTTPException(status_code=403, detail="Not a chat member")
 
 
+
+async def ensure_chat_member(
+    chat_id: str,
+    user_id: str,
+) -> None:
+    async with db_pool.acquire() as conn:
+        await assert_chat_member(conn, chat_id, user_id)
+
+
+async def mark_user_seen(user_id: str) -> datetime:
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE public.users
+            SET last_login_at = $2,
+                updated_at = $2
+            WHERE id = $1
+            """,
+            user_id,
+            current_time,
+        )
+
+    return current_time
+
+
+async def broadcast_user_presence(
+    user_id: str,
+    online: bool,
+    last_seen_at: Optional[datetime] = None,
+):
+    if last_seen_at is None:
+        last_seen_at = now()
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT chat_id
+            FROM public.chat_members
+            WHERE user_id = $1
+              AND hidden = false
+              AND left_at IS NULL
+            """,
+            user_id,
+        )
+
+    payload_time = last_seen_at.isoformat() if last_seen_at else None
+
+    for row in rows:
+        await manager.broadcast_to_chat(
+            row["chat_id"],
+            {
+                "type": "presence.updated",
+                "chat_id": row["chat_id"],
+                "user_id": user_id,
+                "online": online,
+                "last_seen_at": payload_time,
+            },
+            exclude_user_id=user_id,
+        )
+
+
+async def get_user_display_name_by_id(user_id: str) -> str:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT username, nickname, display_name
+            FROM public.users
+            WHERE id = $1
+            """,
+            user_id,
+        )
+
+    if not row:
+        return "Пользователь"
+
+    return user_display_name(row)
+
+
 @app.on_event("startup")
 async def startup():
     global db_pool
@@ -435,6 +520,14 @@ async def startup():
         command_timeout=60,
         max_inactive_connection_lifetime=10,
     )
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            ALTER TABLE public.attachments
+            ADD COLUMN IF NOT EXISTS file_bytes BYTEA
+            """
+        )
 
 
 @app.on_event("shutdown")
@@ -840,6 +933,68 @@ async def update_chat_appearance(
     return {"ok": True}
 
 
+@app.get("/attachments/file/{storage_key:path}")
+async def get_attachment_file(storage_key: str):
+    if ".." in storage_key.replace("\\", "/").split("/"):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT storage_key, original_name, mime_type, file_bytes
+            FROM public.attachments
+            WHERE storage_key = $1
+            """,
+            storage_key,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    content = row["file_bytes"]
+
+    if content is None:
+        base_dir = UPLOAD_DIR.resolve()
+        file_path = (UPLOAD_DIR / storage_key).resolve()
+
+        if not str(file_path).startswith(str(base_dir)):
+            raise HTTPException(status_code=400, detail="Invalid file path")
+
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="File is not available on disk and was not saved in database",
+            )
+
+        content = file_path.read_bytes()
+
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE public.attachments
+                SET file_bytes = $2
+                WHERE storage_key = $1
+                  AND file_bytes IS NULL
+                """,
+                storage_key,
+                content,
+            )
+
+    original_name = row["original_name"] or "file"
+    mime_type = row["mime_type"] or "application/octet-stream"
+
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(original_name)}",
+    }
+
+    return Response(
+        content=bytes(content),
+        media_type=mime_type,
+        headers=headers,
+    )
+
+
 @app.post("/attachments/upload")
 async def upload_attachment(
     uploaded_file: UploadFile = File(...),
@@ -886,9 +1041,10 @@ async def upload_attachment(
                 mime_type,
                 size_bytes,
                 kind,
+                file_bytes,
                 created_at
             )
-            VALUES ($1, $2, NULL, 'message', $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, NULL, 'message', $3, $4, $5, $6, $7, $8, $9)
             """,
             attachment_id,
             user_id,
@@ -897,6 +1053,7 @@ async def upload_attachment(
             mime_type,
             len(content),
             kind,
+            content,
             current_time,
         )
 
@@ -954,9 +1111,10 @@ async def upload_profile_avatar(
                     mime_type,
                     size_bytes,
                     kind,
+                    file_bytes,
                     created_at
                 )
-                VALUES ($1, $2, NULL, 'avatar', $3, $4, $5, $6, 'image', $7)
+                VALUES ($1, $2, NULL, 'avatar', $3, $4, $5, $6, 'image', $7, $8)
                 """,
                 attachment_id,
                 user_id,
@@ -964,6 +1122,7 @@ async def upload_profile_avatar(
                 original_name,
                 mime_type,
                 len(content),
+                content,
                 current_time,
             )
 
@@ -1034,9 +1193,10 @@ async def upload_chat_wallpaper_image(
                 mime_type,
                 size_bytes,
                 kind,
+                file_bytes,
                 created_at
             )
-            VALUES ($1, $2, NULL, 'wallpaper', $3, $4, $5, $6, 'image', $7)
+            VALUES ($1, $2, NULL, 'wallpaper', $3, $4, $5, $6, 'image', $7, $8)
             """,
             attachment_id,
             user_id,
@@ -1044,6 +1204,7 @@ async def upload_chat_wallpaper_image(
             original_name,
             mime_type,
             len(content),
+            content,
             current_time,
         )
 
@@ -1977,9 +2138,10 @@ async def upload_group_avatar(
                     mime_type,
                     size_bytes,
                     kind,
+                    file_bytes,
                     created_at
                 )
-                VALUES ($1, $2, NULL, 'group_avatar', $3, $4, $5, $6, 'image', $7)
+                VALUES ($1, $2, NULL, 'group_avatar', $3, $4, $5, $6, 'image', $7, $8)
                 """,
                 attachment_id,
                 user_id,
@@ -1987,6 +2149,7 @@ async def upload_group_avatar(
                 original_name,
                 mime_type,
                 len(content),
+                content,
                 current_time,
             )
 
@@ -3182,6 +3345,74 @@ async def delete_message_reaction(
     return {"ok": True}
 
 
+
+@app.get("/chats/{chat_id}/presence")
+async def get_chat_presence(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    await ensure_chat_member(chat_id, user_id)
+
+    async with db_pool.acquire() as conn:
+        chat = await conn.fetchrow(
+            """
+            SELECT id, is_group
+            FROM public.chats
+            WHERE id = $1
+            """,
+            chat_id,
+        )
+
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+
+        if chat["is_group"]:
+            return {
+                "chat_id": chat_id,
+                "is_group": True,
+            }
+
+        peer = await conn.fetchrow(
+            """
+            SELECT
+                u.id,
+                u.username,
+                u.nickname,
+                u.display_name,
+                u.last_login_at
+            FROM public.chat_members cm
+            JOIN public.users u
+              ON u.id = cm.user_id
+            WHERE cm.chat_id = $1
+              AND cm.user_id <> $2
+              AND cm.hidden = false
+              AND cm.left_at IS NULL
+            LIMIT 1
+            """,
+            chat_id,
+            user_id,
+        )
+
+    if not peer:
+        return {
+            "chat_id": chat_id,
+            "is_group": False,
+            "online": False,
+            "last_seen_at": None,
+        }
+
+    return {
+        "chat_id": chat_id,
+        "is_group": False,
+        "user_id": peer["id"],
+        "name": user_display_name(peer),
+        "online": manager.is_online(peer["id"]),
+        "last_seen_at": peer["last_login_at"].isoformat()
+        if peer["last_login_at"]
+        else None,
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     token = websocket.query_params.get("token")
@@ -3197,6 +3428,8 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     await manager.connect(user_id, websocket)
+    last_seen_at = await mark_user_seen(user_id)
+    await broadcast_user_presence(user_id, True, last_seen_at)
 
     try:
         await websocket.send_text(
@@ -3218,6 +3451,47 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if event.get("type") == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
+                continue
+
+            if event.get("type") == "chat.activity":
+                chat_id = event.get("chat_id")
+                activity_type = event.get("activity_type")
+
+                allowed_activity_types = {
+                    "idle",
+                    "typing",
+                    "recording_voice",
+                    "sending_audio",
+                    "sending_video",
+                    "sending_photo",
+                }
+
+                if not chat_id or activity_type not in allowed_activity_types:
+                    continue
+
+                try:
+                    await ensure_chat_member(chat_id, user_id)
+                except Exception:
+                    continue
+
+                user_name = await get_user_display_name_by_id(user_id)
+
+                await manager.broadcast_to_chat(
+                    chat_id,
+                    {
+                        "type": "chat.activity",
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "user_name": user_name,
+                        "activity_type": activity_type,
+                        "created_at": now().isoformat(),
+                    },
+                    exclude_user_id=user_id,
+                )
 
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
+
+        if not manager.is_online(user_id):
+            last_seen_at = await mark_user_seen(user_id)
+            await broadcast_user_presence(user_id, False, last_seen_at)
