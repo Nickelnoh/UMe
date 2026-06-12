@@ -1,8 +1,10 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/onesignal_service.dart';
+import '../../core/secure_storage.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/top_notification.dart';
 import '../messages/chat_screen.dart';
@@ -28,7 +30,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
   String? _myUserId;
   String _myName = '';
   String _accentColor = 'blue';
-
 
   List<dynamic> _chats = [];
   List<dynamic> _incomingRequests = [];
@@ -271,32 +272,32 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _refresh() async {
-    if (_refreshing) return;
+  if (_refreshing) return;
 
+  if (mounted) {
+    setState(() {
+      _refreshing = true;
+    });
+  }
+
+  try {
+    await _loadMe();
+    await _loadAll(silent: false);
+
+    if (!mounted) return;
+
+    TopNotification.success(
+      context,
+      message: 'Чаты обновлены',
+    );
+  } finally {
     if (mounted) {
       setState(() {
-        _refreshing = true;
+        _refreshing = false;
       });
     }
-
-    try {
-      await _loadMe();
-      await _loadAll(silent: false);
-
-      if (!mounted) return;
-
-      TopNotification.success(
-        context,
-        message: 'Чаты обновлены',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _refreshing = false;
-        });
-      }
-    }
   }
+}
 
   Future<void> _enablePushNotifications({bool showSuccess = true}) async {
     try {
@@ -326,6 +327,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
         message: 'Ошибка уведомлений: ${_cleanError(e)}',
       );
     }
+  }
+
+
+  Future<void> _logout() async {
+    try {
+      await ApiClient.post('/auth/logout', {});
+    } catch (_) {}
+
+    try {
+      await OneSignalService.logoutUser();
+    } catch (_) {}
+
+    await SecureStorage.clear();
+
+    _wsSubscription?.cancel();
+    _ws.dispose();
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      '/login',
+      (route) => false,
+    );
   }
 
 
@@ -529,7 +553,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     return Color(parsed);
   }
 
-String _cleanError(Object e) {
+  String _cleanError(Object e) {
     var text = e.toString();
     text = text.replaceFirst('Exception: ', '');
 
@@ -593,8 +617,6 @@ String _cleanError(Object e) {
             child: _MobileSideMenu(
               name: _myName.isNotEmpty ? _myName : 'UMe user',
               accent: accent,
-              incomingCount: _incomingRequests.length,
-              outgoingCount: _outgoingRequests.length,
               notificationsEnabled: _notificationsEnabled,
               onFindUser: () {
                 Navigator.of(dialogContext).pop();
@@ -603,10 +625,6 @@ String _cleanError(Object e) {
               onCreateGroup: () {
                 Navigator.of(dialogContext).pop();
                 _openCreateGroup();
-              },
-              onRequests: () {
-                Navigator.of(dialogContext).pop();
-                _openRequests();
               },
               onSettings: () {
                 Navigator.of(dialogContext).pop();
@@ -619,6 +637,10 @@ String _cleanError(Object e) {
               onEnablePush: () {
                 Navigator.of(dialogContext).pop();
                 _enablePushNotifications();
+              },
+              onLogout: () {
+                Navigator.of(dialogContext).pop();
+                _logout();
               },
             ),
           ),
@@ -678,16 +700,6 @@ String _cleanError(Object e) {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openSearchUsers,
-        backgroundColor: fabGreen,
-        foregroundColor: Colors.white,
-        elevation: 7,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: const Icon(Icons.chat_rounded),
-      ),
       body: Column(
         children: [
           _WhatsTopBar(
@@ -1270,28 +1282,24 @@ class _WhatsEmptyChats extends StatelessWidget {
 class _MobileSideMenu extends StatelessWidget {
   final String name;
   final Color accent;
-  final int incomingCount;
-  final int outgoingCount;
   final bool notificationsEnabled;
   final VoidCallback onFindUser;
   final VoidCallback onCreateGroup;
-  final VoidCallback onRequests;
   final VoidCallback onSettings;
   final VoidCallback onRefresh;
   final VoidCallback onEnablePush;
+  final VoidCallback onLogout;
 
   const _MobileSideMenu({
     required this.name,
     required this.accent,
-    required this.incomingCount,
-    required this.outgoingCount,
     required this.notificationsEnabled,
     required this.onFindUser,
     required this.onCreateGroup,
-    required this.onRequests,
     required this.onSettings,
     required this.onRefresh,
     required this.onEnablePush,
+    required this.onLogout,
   });
 
   @override
@@ -1337,12 +1345,6 @@ class _MobileSideMenu extends StatelessWidget {
                     title: 'Создать группу',
                     onTap: onCreateGroup,
                   ),
-                  _MobileSideMenuItem(
-                    icon: Icons.mark_email_unread_rounded,
-                    title: 'Запросы',
-                    badge: incomingCount > 0 ? incomingCount.toString() : null,
-                    onTap: onRequests,
-                  ),
                   if (!notificationsEnabled)
                     _MobileSideMenuItem(
                       icon: Icons.notifications_active_rounded,
@@ -1358,6 +1360,14 @@ class _MobileSideMenu extends StatelessWidget {
                     icon: Icons.refresh_rounded,
                     title: 'Обновить',
                     onTap: onRefresh,
+                  ),
+                  const _MobileSideDivider(),
+                  _MobileSideMenuItem(
+                    icon: Icons.logout_rounded,
+                    title: 'Выйти из аккаунта',
+                    onTap: onLogout,
+                    iconColor: const Color(0xFFFF8A80),
+                    textColor: const Color(0xFFFFCDD2),
                   ),
                 ],
               ),
@@ -1501,6 +1511,7 @@ class _MobileSideMenuItem extends StatelessWidget {
   final VoidCallback onTap;
   final String? badge;
   final Color? iconColor;
+  final Color? textColor;
 
   const _MobileSideMenuItem({
     required this.icon,
@@ -1508,6 +1519,7 @@ class _MobileSideMenuItem extends StatelessWidget {
     required this.onTap,
     this.badge,
     this.iconColor,
+    this.textColor,
   });
 
   @override
@@ -1527,8 +1539,8 @@ class _MobileSideMenuItem extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: textColor ?? Colors.white,
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                 ),
