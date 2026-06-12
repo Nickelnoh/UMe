@@ -170,7 +170,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickAvatar() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         withData: true,
         allowMultiple: false,
         type: FileType.image,
@@ -204,7 +204,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickChatWallpaperImage() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         withData: true,
         allowMultiple: false,
         type: FileType.image,
