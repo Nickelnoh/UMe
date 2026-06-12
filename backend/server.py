@@ -2464,27 +2464,38 @@ async def send_onesignal_push_to_users(
         print("OneSignal skipped: no target users", flush=True)
         return
 
+    notification_title = "UMe"
+    notification_body = f"{title}: {body[:160]}"
+
     payload = {
         "app_id": ONESIGNAL_APP_ID,
         "include_aliases": {
             "external_id": target_user_ids,
         },
         "target_channel": "push",
+
         "headings": {
-            "en": title,
-            "ru": title,
+            "en": notification_title,
+            "ru": notification_title,
         },
         "contents": {
-            "en": body[:180],
-            "ru": body[:180],
+            "en": notification_body,
+            "ru": notification_body,
         },
+
+        "web_url": "https://ume-messenger-bd3b1.web.app/",
+
+        "chrome_web_icon": "https://ume-messenger-bd3b1.web.app/icons/Icon-192.png",
+        "chrome_web_badge": "https://ume-messenger-bd3b1.web.app/icons/Icon-192.png",
+
         "data": {
             "type": "message.created",
             "chat_id": chat_id,
             "sender_user_id": sender_user_id,
         },
-        "web_url": f"https://ume-messenger-bd3b1.web.app/",
     }
+      
+    
 
     try:
         result = await asyncio.to_thread(_send_onesignal_request_sync, payload)
