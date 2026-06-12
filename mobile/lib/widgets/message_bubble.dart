@@ -80,12 +80,10 @@ class MessageBubble extends StatelessWidget {
     final accent = accentColor ?? Theme.of(context).colorScheme.primary;
 
     final color = isMine
-        ? accent.withValues(alpha: 0.22)
-        : Theme.of(context).colorScheme.surfaceContainerHighest;
+        ? const Color(0xFFDCF8C6)
+        : Colors.white;
 
-    final textColor = isMine
-        ? Theme.of(context).colorScheme.onPrimaryContainer
-        : Theme.of(context).colorScheme.onSurfaceVariant;
+    final textColor = const Color(0xFF111111);
 
     final radius = switch (bubbleStyle) {
       'compact' => 10.0,
@@ -534,15 +532,6 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: widget.textColor,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
                 Slider(
                   value: current,
                   min: 0,

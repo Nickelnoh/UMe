@@ -44,6 +44,10 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _loading = true;
   bool _sending = false;
   bool _recording = false;
+  bool _recordLocked = false;
+  bool _hasTextInput = false;
+
+  DateTime? _recordingStartedAt;
 
   String? _myUserId;
   late String _title;
@@ -61,6 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _title = widget.title;
+    _messageController.addListener(_handleTextInputChanged);
     _init();
   }
 
@@ -68,6 +73,17 @@ class _ChatScreenState extends State<ChatScreen> {
     await _loadMe();
     await _loadMessages();
     await _connectWebSocket();
+  }
+
+  void _handleTextInputChanged() {
+    final hasText = _messageController.text.trim().isNotEmpty;
+
+    if (_hasTextInput == hasText) return;
+    if (!mounted) return;
+
+    setState(() {
+      _hasTextInput = hasText;
+    });
   }
 
   Future<void> _loadMe() async {
@@ -424,7 +440,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _startVoiceRecording() async {
+  Future<void> _startVoiceRecording({bool locked = false}) async {
     if (_recording || _sending) return;
 
     try {
@@ -451,7 +467,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (!mounted) return;
 
-      setState(() => _recording = true);
+      setState(() {
+        _recording = true;
+        _recordLocked = locked;
+        _recordingStartedAt = DateTime.now();
+      });
 
       TopNotification.info(
         context,
@@ -463,12 +483,56 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _lockVoiceRecording() {
+    if (!_recording || _recordLocked) return;
+
+    setState(() {
+      _recordLocked = true;
+    });
+
+    TopNotification.info(
+      context,
+      title: 'Голосовое сообщение',
+      message: 'Запись закреплена. Нажмите отправку, когда закончите.',
+    );
+  }
+
+  Future<void> _handleMicLongPressStart(LongPressStartDetails details) async {
+    if (_hasTextInput || _sending) return;
+    await _startVoiceRecording();
+  }
+
+  void _handleMicLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+    if (!_recording || _recordLocked) return;
+
+    if (details.offsetFromOrigin.dy < -70) {
+      _lockVoiceRecording();
+    }
+  }
+
+  Future<void> _handleMicLongPressEnd(LongPressEndDetails details) async {
+    if (!_recording || _recordLocked) return;
+    await _stopVoiceRecordingAndSend();
+  }
+
+  void _handleMicTap() {
+    if (_sending || _recording) return;
+
+    TopNotification.info(
+      context,
+      title: 'Голосовое сообщение',
+      message: 'Зажмите микрофон для записи. Потяните вверх, чтобы закрепить.',
+    );
+  }
+
   Future<void> _stopVoiceRecordingAndSend() async {
     if (!_recording) return;
 
     try {
       setState(() {
         _recording = false;
+        _recordLocked = false;
+        _recordingStartedAt = null;
         _sending = true;
       });
 
@@ -517,6 +581,8 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         setState(() {
           _recording = false;
+          _recordLocked = false;
+          _recordingStartedAt = null;
           _sending = false;
         });
       }
@@ -534,7 +600,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (!mounted) return;
 
-      setState(() => _recording = false);
+      setState(() {
+        _recording = false;
+        _recordLocked = false;
+        _recordingStartedAt = null;
+      });
 
       TopNotification.info(
         context,
@@ -1326,6 +1396,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   BoxDecoration _wallpaperDecoration(BuildContext context) {
     final accent = _accentColorValue();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final isCustomImage = _chatWallpaper.startsWith('/uploads/') ||
         _chatWallpaper.startsWith('http://') ||
@@ -1348,7 +1419,7 @@ class _ChatScreenState extends State<ChatScreen> {
     switch (_chatWallpaper) {
       case 'clean':
         return BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: isDark ? const Color(0xFF0B141A) : Theme.of(context).colorScheme.surfaceContainerHighest,
         );
 
       case 'gradient':
@@ -1392,8 +1463,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       case 'default':
       default:
-        return const BoxDecoration(
-          color: Color(0xFFECE5DD),
+        return BoxDecoration(
+          color: isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
         );
     }
   }
@@ -1580,11 +1651,18 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final messages = _messages;
     final accent = _accentColorValue();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final chatBackgroundColor = isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD);
+    final inputBarColor = isDark ? const Color(0xFF1F2C34) : const Color(0xFFF0F0F0);
+    final inputFillColor = isDark ? const Color(0xFF2A3942) : Colors.white;
+    final inputTextColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final inputHintColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF9AA0A6);
+    final inputBorderColor = isDark ? const Color(0xFF2A3942) : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFECE5DD),
+      backgroundColor: chatBackgroundColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF075E54),
+        backgroundColor: accent,
         foregroundColor: Colors.white,
         elevation: 0,
         titleSpacing: 0,
@@ -1627,34 +1705,13 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           children: [
             if (_recording)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                color: accent.withValues(alpha: 0.12),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.mic,
-                      color: const Color(0xFF075E54),
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('Идёт запись голосового сообщения...'),
-                    ),
-                    TextButton(
-                      onPressed: _cancelVoiceRecording,
-                      child: const Text('Отмена'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _stopVoiceRecordingAndSend,
-                      icon: const Icon(Icons.send),
-                      label: const Text('Отправить'),
-                    ),
-                  ],
-                ),
+              _VoiceRecordingPanel(
+                accent: accent,
+                locked: _recordLocked,
+                startedAt: _recordingStartedAt,
+                onLock: _lockVoiceRecording,
+                onCancel: _cancelVoiceRecording,
+                onSend: _stopVoiceRecordingAndSend,
               ),
             Expanded(
               child: RefreshIndicator(
@@ -1713,13 +1770,10 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Container(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0F0F0),
+                  color: inputBarColor,
                   border: Border(
                     top: BorderSide(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .outlineVariant
-                          .withValues(alpha: 0.5),
+                      color: inputBorderColor,
                     ),
                   ),
                 ),
@@ -1729,21 +1783,15 @@ class _ChatScreenState extends State<ChatScreen> {
                       tooltip: 'Прикрепить файлы',
                       onPressed:
                           _sending || _recording ? null : _openInternalFileManager,
-                      color: const Color(0xFF075E54),
+                      color: accent,
                       icon: const Icon(Icons.attach_file),
-                    ),
-                    IconButton(
-                      tooltip:
-                          _recording ? 'Запись идёт' : 'Голосовое сообщение',
-                      onPressed:
-                          _sending || _recording ? null : _startVoiceRecording,
-                      color: _recording ? Colors.red : accent,
-                      icon: Icon(_recording ? Icons.mic : Icons.mic_none),
                     ),
                     Expanded(
                       child: TextField(
                         controller: _messageController,
                         enabled: !_recording,
+                        style: TextStyle(color: inputTextColor),
+                        cursorColor: accent,
                         minLines: 1,
                         maxLines: 4,
                         textInputAction: TextInputAction.send,
@@ -1751,9 +1799,14 @@ class _ChatScreenState extends State<ChatScreen> {
                           if (!_sending && !_recording) _sendTextMessage();
                         },
                         decoration: InputDecoration(
-                          hintText: 'Сообщение',
+                          hintText: _recording
+                              ? (_recordLocked
+                                  ? 'Запись закреплена'
+                                  : 'Отпустите, чтобы отправить')
+                              : 'Сообщение',
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: inputFillColor,
+                          hintStyle: TextStyle(color: inputHintColor),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
                             borderSide: BorderSide.none,
@@ -1767,26 +1820,207 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFF075E54),
-                        foregroundColor: Colors.white,
+                    if (_hasTextInput || (_recording && _recordLocked))
+                      IconButton.filled(
+                        style: IconButton.styleFrom(
+                          backgroundColor: accent,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _sending
+                            ? null
+                            : (_recording
+                                ? _stopVoiceRecordingAndSend
+                                : _sendTextMessage),
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send),
+                      )
+                    else
+                      _HoldToRecordButton(
+                        accent: accent,
+                        recording: _recording,
+                        disabled: _sending,
+                        onTap: _handleMicTap,
+                        onLongPressStart: _handleMicLongPressStart,
+                        onLongPressMoveUpdate: _handleMicLongPressMoveUpdate,
+                        onLongPressEnd: _handleMicLongPressEnd,
                       ),
-                      onPressed:
-                          _sending || _recording ? null : _sendTextMessage,
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send),
-                    ),
                   ],
                 ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _VoiceRecordingPanel extends StatelessWidget {
+  final Color accent;
+  final bool locked;
+  final DateTime? startedAt;
+  final VoidCallback onLock;
+  final VoidCallback onCancel;
+  final VoidCallback onSend;
+
+  const _VoiceRecordingPanel({
+    required this.accent,
+    required this.locked,
+    required this.startedAt,
+    required this.onLock,
+    required this.onCancel,
+    required this.onSend,
+  });
+
+  String _elapsedText() {
+    final started = startedAt;
+    if (started == null) return '00:00';
+
+    final elapsed = DateTime.now().difference(started);
+    final minutes = elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final panelColor = isDark ? const Color(0xFF1F2C34) : const Color(0xFFE8F5E9);
+    final textColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF5F6368);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        color: panelColor,
+        border: Border(
+          bottom: BorderSide(
+            color: accent.withValues(alpha: 0.18),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: locked ? accent : Colors.redAccent,
+            foregroundColor: Colors.white,
+            child: Icon(locked ? Icons.lock_rounded : Icons.mic_rounded, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  locked ? 'Запись закреплена' : 'Идёт запись голосового',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  locked
+                      ? '${_elapsedText()} · нажмите отправку, когда закончите'
+                      : '${_elapsedText()} · отпустите кнопку для отправки',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: subColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!locked)
+            IconButton(
+              tooltip: 'Закрепить запись',
+              onPressed: onLock,
+              color: accent,
+              icon: const Icon(Icons.lock_open_rounded),
+            ),
+          IconButton(
+            tooltip: 'Отменить запись',
+            onPressed: onCancel,
+            color: Colors.redAccent,
+            icon: const Icon(Icons.delete_outline_rounded),
+          ),
+          if (locked)
+            IconButton.filled(
+              tooltip: 'Отправить голосовое',
+              onPressed: onSend,
+              style: IconButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.send_rounded),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HoldToRecordButton extends StatelessWidget {
+  final Color accent;
+  final bool recording;
+  final bool disabled;
+  final VoidCallback onTap;
+  final GestureLongPressStartCallback onLongPressStart;
+  final GestureLongPressMoveUpdateCallback onLongPressMoveUpdate;
+  final GestureLongPressEndCallback onLongPressEnd;
+
+  const _HoldToRecordButton({
+    required this.accent,
+    required this.recording,
+    required this.disabled,
+    required this.onTap,
+    required this.onLongPressStart,
+    required this.onLongPressMoveUpdate,
+    required this.onLongPressEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = recording ? Colors.redAccent : accent;
+
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      onLongPressStart: disabled ? null : onLongPressStart,
+      onLongPressMoveUpdate: disabled ? null : onLongPressMoveUpdate,
+      onLongPressEnd: disabled ? null : onLongPressEnd,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: disabled ? color.withValues(alpha: 0.45) : color,
+          shape: BoxShape.circle,
+          boxShadow: [
+            if (recording)
+              BoxShadow(
+                color: Colors.redAccent.withValues(alpha: 0.32),
+                blurRadius: 18,
+                spreadRadius: 2,
+              ),
+          ],
+        ),
+        child: Icon(
+          recording ? Icons.mic_rounded : Icons.mic_none_rounded,
+          color: Colors.white,
         ),
       ),
     );
