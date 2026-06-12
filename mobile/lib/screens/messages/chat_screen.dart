@@ -493,7 +493,7 @@ class _ChatScreenState extends State<ChatScreen> {
     TopNotification.info(
       context,
       title: 'Голосовое сообщение',
-      message: 'Запись закреплена. Нажмите отправку, когда закончите.',
+      message: 'Автозапись включена. Нажмите микрофон ещё раз, чтобы отправить.',
     );
   }
 
@@ -516,7 +516,14 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleMicTap() {
-    if (_sending || _recording) return;
+    if (_sending) return;
+
+    if (_recording && _recordLocked) {
+      _stopVoiceRecordingAndSend();
+      return;
+    }
+
+    if (_recording) return;
 
     TopNotification.info(
       context,
@@ -1704,15 +1711,6 @@ class _ChatScreenState extends State<ChatScreen> {
         decoration: _wallpaperDecoration(context),
         child: Column(
           children: [
-            if (_recording)
-              _VoiceRecordingPanel(
-                accent: accent,
-                locked: _recordLocked,
-                startedAt: _recordingStartedAt,
-                onLock: _lockVoiceRecording,
-                onCancel: _cancelVoiceRecording,
-                onSend: _stopVoiceRecordingAndSend,
-              ),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: () async {
@@ -1777,78 +1775,92 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ),
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      tooltip: 'Прикрепить файлы',
-                      onPressed:
-                          _sending || _recording ? null : _openInternalFileManager,
-                      color: accent,
-                      icon: const Icon(Icons.attach_file),
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _messageController,
-                        enabled: !_recording,
-                        style: TextStyle(color: inputTextColor),
-                        cursorColor: accent,
-                        minLines: 1,
-                        maxLines: 4,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) {
-                          if (!_sending && !_recording) _sendTextMessage();
-                        },
-                        decoration: InputDecoration(
-                          hintText: _recording
-                              ? (_recordLocked
-                                  ? 'Запись закреплена'
-                                  : 'Отпустите, чтобы отправить')
-                              : 'Сообщение',
-                          filled: true,
-                          fillColor: inputFillColor,
-                          hintStyle: TextStyle(color: inputHintColor),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                            borderSide: BorderSide.none,
-                          ),
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 11,
-                          ),
+                    if (_recording)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _VoiceRecordingPanel(
+                          accent: accent,
+                          locked: _recordLocked,
+                          startedAt: _recordingStartedAt,
+                          onLock: _lockVoiceRecording,
+                          onCancel: _cancelVoiceRecording,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (_hasTextInput || (_recording && _recordLocked))
-                      IconButton.filled(
-                        style: IconButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: Colors.white,
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Прикрепить файлы',
+                          onPressed: _sending || _recording
+                              ? null
+                              : _openInternalFileManager,
+                          color: accent,
+                          icon: const Icon(Icons.attach_file),
                         ),
-                        onPressed: _sending
-                            ? null
-                            : (_recording
-                                ? _stopVoiceRecordingAndSend
-                                : _sendTextMessage),
-                        icon: _sending
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send),
-                      )
-                    else
-                      _HoldToRecordButton(
-                        accent: accent,
-                        recording: _recording,
-                        disabled: _sending,
-                        onTap: _handleMicTap,
-                        onLongPressStart: _handleMicLongPressStart,
-                        onLongPressMoveUpdate: _handleMicLongPressMoveUpdate,
-                        onLongPressEnd: _handleMicLongPressEnd,
-                      ),
+                        Expanded(
+                          child: TextField(
+                            controller: _messageController,
+                            enabled: !_recording,
+                            style: TextStyle(color: inputTextColor),
+                            cursorColor: accent,
+                            minLines: 1,
+                            maxLines: 4,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) {
+                              if (!_sending && !_recording) _sendTextMessage();
+                            },
+                            decoration: InputDecoration(
+                              hintText: _recording
+                                  ? (_recordLocked
+                                      ? 'Автозапись идёт'
+                                      : 'Потяните вверх для автозаписи')
+                                  : 'Сообщение',
+                              filled: true,
+                              fillColor: inputFillColor,
+                              hintStyle: TextStyle(color: inputHintColor),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (_hasTextInput && !_recording)
+                          IconButton.filled(
+                            style: IconButton.styleFrom(
+                              backgroundColor: accent,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: _sending ? null : _sendTextMessage,
+                            icon: _sending
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.send_rounded),
+                          )
+                        else
+                          _HoldToRecordButton(
+                            accent: accent,
+                            recording: _recording,
+                            locked: _recordLocked,
+                            disabled: _sending,
+                            onTap: _handleMicTap,
+                            onLongPressStart: _handleMicLongPressStart,
+                            onLongPressMoveUpdate: _handleMicLongPressMoveUpdate,
+                            onLongPressEnd: _handleMicLongPressEnd,
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1867,7 +1879,6 @@ class _VoiceRecordingPanel extends StatelessWidget {
   final DateTime? startedAt;
   final VoidCallback onLock;
   final VoidCallback onCancel;
-  final VoidCallback onSend;
 
   const _VoiceRecordingPanel({
     required this.accent,
@@ -1875,7 +1886,6 @@ class _VoiceRecordingPanel extends StatelessWidget {
     required this.startedAt,
     required this.onLock,
     required this.onCancel,
-    required this.onSend,
   });
 
   String _elapsedText() {
@@ -1897,13 +1907,12 @@ class _VoiceRecordingPanel extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
       decoration: BoxDecoration(
         color: panelColor,
-        border: Border(
-          bottom: BorderSide(
-            color: accent.withValues(alpha: 0.18),
-          ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accent.withValues(alpha: locked ? 0.36 : 0.18),
         ),
       ),
       child: Row(
@@ -1921,7 +1930,7 @@ class _VoiceRecordingPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  locked ? 'Запись закреплена' : 'Идёт запись голосового',
+                  locked ? 'Автозапись включена' : 'Идёт запись голосового',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1932,8 +1941,8 @@ class _VoiceRecordingPanel extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   locked
-                      ? '${_elapsedText()} · нажмите отправку, когда закончите'
-                      : '${_elapsedText()} · отпустите кнопку для отправки',
+                      ? '${_elapsedText()} · нажмите микрофон ещё раз, чтобы отправить'
+                      : '${_elapsedText()} · отпустите для отправки или потяните вверх',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1958,16 +1967,6 @@ class _VoiceRecordingPanel extends StatelessWidget {
             color: Colors.redAccent,
             icon: const Icon(Icons.delete_outline_rounded),
           ),
-          if (locked)
-            IconButton.filled(
-              tooltip: 'Отправить голосовое',
-              onPressed: onSend,
-              style: IconButton.styleFrom(
-                backgroundColor: accent,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.send_rounded),
-            ),
         ],
       ),
     );
@@ -1977,6 +1976,7 @@ class _VoiceRecordingPanel extends StatelessWidget {
 class _HoldToRecordButton extends StatelessWidget {
   final Color accent;
   final bool recording;
+  final bool locked;
   final bool disabled;
   final VoidCallback onTap;
   final GestureLongPressStartCallback onLongPressStart;
@@ -1986,6 +1986,7 @@ class _HoldToRecordButton extends StatelessWidget {
   const _HoldToRecordButton({
     required this.accent,
     required this.recording,
+    required this.locked,
     required this.disabled,
     required this.onTap,
     required this.onLongPressStart,
@@ -1995,7 +1996,7 @@ class _HoldToRecordButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = recording ? Colors.redAccent : accent;
+    final color = recording ? (locked ? accent : Colors.redAccent) : accent;
 
     return GestureDetector(
       onTap: disabled ? null : onTap,
@@ -2019,7 +2020,9 @@ class _HoldToRecordButton extends StatelessWidget {
           ],
         ),
         child: Icon(
-          recording ? Icons.mic_rounded : Icons.mic_none_rounded,
+          recording
+              ? (locked ? Icons.mic_rounded : Icons.keyboard_voice_rounded)
+              : Icons.mic_none_rounded,
           color: Colors.white,
         ),
       ),
