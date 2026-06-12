@@ -6,6 +6,83 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
 
+class VoicePlaybackQueue {
+  static List<String> _urls = const [];
+  static final Map<String, _VoicePlaybackEntry> _entries = {};
+
+  static void setUrls(List<String> urls) {
+    final unique = <String>[];
+
+    for (final url in urls) {
+      if (url.trim().isEmpty) continue;
+      if (unique.contains(url)) continue;
+      unique.add(url);
+    }
+
+    _urls = unique;
+  }
+
+  static void register(
+    String url, {
+    required Future<void> Function() play,
+    required Future<void> Function() stop,
+  }) {
+    _entries[url] = _VoicePlaybackEntry(
+      play: play,
+      stop: stop,
+    );
+  }
+
+  static void unregister(String url) {
+    _entries.remove(url);
+  }
+
+  static Future<void> play(String url) async {
+    final target = _entries[url];
+
+    if (target == null) return;
+
+    for (final entry in _entries.entries) {
+      if (entry.key == url) continue;
+      await entry.value.stop();
+    }
+
+    await target.play();
+  }
+
+  static Future<void> pause(String url) async {
+    final target = _entries[url];
+    if (target == null) return;
+
+    await target.stop();
+  }
+
+  static Future<void> playNextAfter(String currentUrl) async {
+    final currentIndex = _urls.indexOf(currentUrl);
+
+    if (currentIndex == -1) return;
+
+    for (int i = currentIndex + 1; i < _urls.length; i++) {
+      final nextUrl = _urls[i];
+
+      if (_entries.containsKey(nextUrl)) {
+        await play(nextUrl);
+        return;
+      }
+    }
+  }
+}
+
+class _VoicePlaybackEntry {
+  final Future<void> Function() play;
+  final Future<void> Function() stop;
+
+  const _VoicePlaybackEntry({
+    required this.play,
+    required this.stop,
+  });
+}
+
 class MessageBubble extends StatelessWidget {
   final String? text;
   final Map<String, dynamic>? attachment;
@@ -461,6 +538,12 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
   void initState() {
     super.initState();
 
+    VoicePlaybackQueue.register(
+      widget.url,
+      play: _playFromQueue,
+      stop: _stopFromQueue,
+    );
+
     final estimated = _estimateWavDuration();
     if (estimated != null) {
       _duration = estimated;
@@ -480,10 +563,13 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
 
     _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
+
       setState(() {
         _isPlaying = false;
         _position = Duration.zero;
       });
+
+      unawaited(VoicePlaybackQueue.playNextAfter(widget.url));
     });
   }
 
@@ -528,11 +614,14 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
 
   Future<void> _toggle() async {
     if (_isPlaying) {
-      await _player.pause();
-      setState(() => _isPlaying = false);
+      await VoicePlaybackQueue.pause(widget.url);
       return;
     }
 
+    await VoicePlaybackQueue.play(widget.url);
+  }
+
+  Future<void> _playFromQueue() async {
     await _prepareSource();
 
     try {
@@ -553,6 +642,16 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
     });
   }
 
+  Future<void> _stopFromQueue() async {
+    try {
+      await _player.pause();
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    setState(() => _isPlaying = false);
+  }
+
   Future<void> _seek(double value) async {
     final next = Duration(milliseconds: value.toInt());
     await _player.seek(next);
@@ -566,6 +665,7 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
 
   @override
   void dispose() {
+    VoicePlaybackQueue.unregister(widget.url);
     _player.dispose();
     super.dispose();
   }

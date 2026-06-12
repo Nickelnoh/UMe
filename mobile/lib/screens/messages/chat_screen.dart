@@ -1682,9 +1682,34 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  List<String> _voicePlaybackUrls(List<dynamic> messages) {
+    final urls = <String>[];
+
+    for (final item in messages) {
+      if (item is! Map) continue;
+
+      final message = Map<String, dynamic>.from(item);
+      final rawAttachment = message['attachment'];
+
+      if (rawAttachment is! Map) continue;
+
+      final attachment = Map<String, dynamic>.from(rawAttachment);
+      final kind = attachment['kind']?.toString();
+      final rawUrl = attachment['url']?.toString();
+
+      if (kind != 'audio') continue;
+      if (rawUrl == null || rawUrl.trim().isEmpty) continue;
+
+      urls.add(ApiClient.absoluteUrl(rawUrl));
+    }
+
+    return urls;
+  }
+
   @override
   Widget build(BuildContext context) {
     final messages = _messages;
+    VoicePlaybackQueue.setUrls(_voicePlaybackUrls(messages));
     final accent = _accentColorValue();
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final chatBackgroundColor = isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD);
@@ -1763,6 +1788,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           )
                         : ListView.builder(
                             controller: _scrollController,
+                            cacheExtent: 1400,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             itemCount: messages.length,
                             itemBuilder: (context, index) {

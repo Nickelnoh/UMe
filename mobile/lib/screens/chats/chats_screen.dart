@@ -40,7 +40,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
   List<dynamic> _outgoingRequests = [];
 
   Color get _whatsAppGreen => accentColorNotifier.value;
-  Color get _whatsAppFabGreen => accentColorNotifier.value;
 
   @override
   void initState() {
