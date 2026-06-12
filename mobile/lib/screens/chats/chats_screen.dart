@@ -24,6 +24,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   bool _loading = true;
   bool _refreshing = false;
+  bool _notificationsEnabled = false;
 
   String? _myUserId;
   String _myName = '';
@@ -50,9 +51,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       final me = await ApiClient.get('/me');
       final userId = me['id']?.toString();
 
-  if (userId != null && userId.isNotEmpty) {
-  await OneSignalService.loginUser(userId);
-}
+      if (userId != null && userId.isNotEmpty) {
+        await OneSignalService.loginUser(userId);
+      }
 
       if (!mounted) return;
 
@@ -66,10 +67,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _accentColor = me['accent_color']?.toString() ?? 'blue';
         _chatWallpaper = me['chat_wallpaper']?.toString() ?? 'default';
       });
-
-      if (userId != null && userId.isNotEmpty) {
-        await OneSignalService.loginUser(userId);
-      }
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -296,6 +293,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
       await OneSignalService.requestPermission();
 
       if (!mounted) return;
+
+      setState(() {
+        _notificationsEnabled = true;
+      });
 
       if (showSuccess) {
         TopNotification.success(
@@ -606,46 +607,99 @@ class _ChatsScreenState extends State<ChatsScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Чаты'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'UMe',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            if (_myName.isNotEmpty)
+              Text(
+                _myName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+          ],
+        ),
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: accent.withValues(alpha: 0.16),
+        backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.68),
         foregroundColor: Theme.of(context).colorScheme.onSurface,
         actions: [
-          IconButton(
-            tooltip: 'Создать группу',
-            onPressed: _openCreateGroup,
-            icon: const Icon(Icons.group_add_outlined),
-          ),
-          IconButton(
-            tooltip: 'Запросы',
-            onPressed: _openRequests,
-            icon: Badge(
-              isLabelVisible: incomingCount > 0,
-              label: Text(incomingCount.toString()),
-              child: const Icon(Icons.mark_email_unread_outlined),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Включить уведомления',
-            onPressed: () => _enablePushNotifications(),
-            icon: const Icon(Icons.notifications_active_outlined),
-          ),
-          IconButton(
-            tooltip: 'Настройки',
-            onPressed: _openSettings,
-            icon: const Icon(Icons.settings),
-          ),
-          IconButton(
-            tooltip: 'Обновить',
-            onPressed: _refreshing ? null : _refresh,
-            icon: _refreshing
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh),
+          PopupMenuButton<String>(
+            tooltip: 'Меню',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              switch (value) {
+                case 'group':
+                  await _openCreateGroup();
+                  break;
+                case 'requests':
+                  await _openRequests();
+                  break;
+                case 'notifications':
+                  await _enablePushNotifications();
+                  break;
+                case 'settings':
+                  await _openSettings();
+                  break;
+                case 'refresh':
+                  await _refresh();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'group',
+                child: ListTile(
+                  leading: Icon(Icons.group_add_outlined),
+                  title: Text('Создать группу'),
+                  dense: true,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'requests',
+                child: ListTile(
+                  leading: Badge(
+                    isLabelVisible: incomingCount > 0,
+                    label: Text(incomingCount.toString()),
+                    child: const Icon(Icons.mark_email_unread_outlined),
+                  ),
+                  title: const Text('Запросы'),
+                  dense: true,
+                ),
+              ),
+              if (!_notificationsEnabled)
+                const PopupMenuItem(
+                  value: 'notifications',
+                  child: ListTile(
+                    leading: Icon(Icons.notifications_active_outlined),
+                    title: Text('Включить уведомления'),
+                    dense: true,
+                  ),
+                ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('Настройки'),
+                  dense: true,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'refresh',
+                enabled: !_refreshing,
+                child: const ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('Обновить'),
+                  dense: true,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -674,6 +728,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       _HeaderCard(
                         name: _myName,
                         accent: accent,
+                        notificationsEnabled: _notificationsEnabled,
+                      ),
+                      const SizedBox(height: 12),
+                      _QuickActionsGrid(
+                        accent: accent,
+                        notificationsEnabled: _notificationsEnabled,
+                        incomingCount: incomingCount,
+                        onSearch: _openSearchUsers,
+                        onCreateGroup: _openCreateGroup,
+                        onRequests: _openRequests,
+                        onEnableNotifications: () => _enablePushNotifications(),
                       ),
                       const SizedBox(height: 12),
                       if (incomingCount > 0 || outgoingCount > 0)
@@ -743,10 +808,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
 class _HeaderCard extends StatelessWidget {
   final String name;
   final Color accent;
+  final bool notificationsEnabled;
 
   const _HeaderCard({
     required this.name,
     required this.accent,
+    required this.notificationsEnabled,
   });
 
   @override
@@ -785,10 +852,243 @@ class _HeaderCard extends StatelessWidget {
                       'Вы вошли как $name',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _StatusPill(
+                        icon: Icons.lock_outline,
+                        text: 'личные чаты',
+                        accent: accent,
+                      ),
+                      _StatusPill(
+                        icon: notificationsEnabled
+                            ? Icons.notifications_active_outlined
+                            : Icons.notifications_none_outlined,
+                        text: notificationsEnabled ? 'уведомления включены' : 'уведомления не включены',
+                        accent: accent,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _StatusPill extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color accent;
+
+  const _StatusPill({
+    required this.icon,
+    required this.text,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: accent),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickActionsGrid extends StatelessWidget {
+  final Color accent;
+  final bool notificationsEnabled;
+  final int incomingCount;
+  final VoidCallback onSearch;
+  final VoidCallback onCreateGroup;
+  final VoidCallback onRequests;
+  final VoidCallback onEnableNotifications;
+
+  const _QuickActionsGrid({
+    required this.accent,
+    required this.notificationsEnabled,
+    required this.incomingCount,
+    required this.onSearch,
+    required this.onCreateGroup,
+    required this.onRequests,
+    required this.onEnableNotifications,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = <_QuickActionData>[
+      _QuickActionData(
+        icon: Icons.person_search,
+        title: 'Найти',
+        subtitle: 'новый чат',
+        onTap: onSearch,
+      ),
+      _QuickActionData(
+        icon: Icons.group_add_outlined,
+        title: 'Группа',
+        subtitle: 'создать',
+        onTap: onCreateGroup,
+      ),
+      _QuickActionData(
+        icon: Icons.mark_email_unread_outlined,
+        title: 'Запросы',
+        subtitle: incomingCount > 0 ? '$incomingCount вход.' : 'проверить',
+        badge: incomingCount,
+        onTap: onRequests,
+      ),
+      if (!notificationsEnabled)
+        _QuickActionData(
+          icon: Icons.notifications_active_outlined,
+          title: 'Push',
+          subtitle: 'включить',
+          onTap: onEnableNotifications,
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth > 520 ? 4 : 2;
+        final spacing = 10.0;
+        final itemWidth = (constraints.maxWidth - spacing * (columns - 1)) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: actions.map((action) {
+            return SizedBox(
+              width: itemWidth,
+              child: _QuickActionCard(
+                accent: accent,
+                data: action,
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
+class _QuickActionData {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final int badge;
+  final VoidCallback onTap;
+
+  const _QuickActionData({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.badge = 0,
+  });
+}
+
+class _QuickActionCard extends StatelessWidget {
+  final Color accent;
+  final _QuickActionData data;
+
+  const _QuickActionCard({
+    required this.accent,
+    required this.data,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onAccent = accent.computeLuminance() > 0.55 ? Colors.black : Colors.white;
+
+    return Material(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.82),
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: data.onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: accent.withValues(alpha: 0.16)),
+          ),
+          child: Row(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: accent,
+                    foregroundColor: onAccent,
+                    child: Icon(data.icon, size: 22),
+                  ),
+                  if (data.badge > 0)
+                    Positioned(
+                      right: -4,
+                      top: -5,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.error,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          data.badge.toString(),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onError,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      data.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      data.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
