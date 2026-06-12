@@ -1167,6 +1167,10 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         last_msg.text AS last_message_text,
                         last_msg.message_type AS last_message_type,
                         last_msg.created_at AS last_message_created_at,
+                        last_msg.sender_user_id AS last_message_sender_user_id,
+                        last_msg.sender_username AS last_message_sender_username,
+                        last_msg.sender_nickname AS last_message_sender_nickname,
+                        last_msg.sender_display_name AS last_message_sender_display_name,
                         member_count.count AS member_count
                     FROM public.chat_members cm
                     JOIN public.chats c
@@ -1186,8 +1190,14 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         SELECT
                             m.text,
                             m.message_type,
-                            m.created_at
+                            m.created_at,
+                            m.sender_user_id,
+                            sender.username AS sender_username,
+                            sender.nickname AS sender_nickname,
+                            sender.display_name AS sender_display_name
                         FROM public.messages m
+                        JOIN public.users sender
+                          ON sender.id = m.sender_user_id
                         WHERE m.chat_id = c.id
                           AND m.deleted_at IS NULL
                         ORDER BY m.created_at DESC
@@ -1236,6 +1246,10 @@ async def list_chats(user_id: str = Depends(get_current_user_id)):
                         "avatar_url": avatar_url,
                         "last_message_text": last_message_text,
                         "last_message_type": row["last_message_type"],
+                        "last_message_sender_user_id": row["last_message_sender_user_id"],
+                        "last_message_sender_name": row["last_message_sender_display_name"]
+                        or row["last_message_sender_nickname"]
+                        or row["last_message_sender_username"],
                         "last_message_created_at": row["last_message_created_at"].isoformat()
                         if row["last_message_created_at"]
                         else None,

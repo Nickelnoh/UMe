@@ -1392,8 +1392,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       case 'default':
       default:
-        return BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
+        return const BoxDecoration(
+          color: Color(0xFFECE5DD),
         );
     }
   }
@@ -1582,14 +1582,43 @@ class _ChatScreenState extends State<ChatScreen> {
     final accent = _accentColorValue();
 
     return Scaffold(
+      backgroundColor: const Color(0xFFECE5DD),
       appBar: AppBar(
-        title: Text(_title),
+        backgroundColor: const Color(0xFF075E54),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.white.withValues(alpha: 0.20),
+              foregroundColor: Colors.white,
+              child: Icon(
+                widget.isGroup ? Icons.groups_rounded : Icons.person_rounded,
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           if (widget.isGroup)
             IconButton(
               tooltip: 'Информация о группе',
               onPressed: _openGroupInfo,
-              icon: const Icon(Icons.groups_2_outlined),
+              icon: const Icon(Icons.more_vert_rounded),
             ),
         ],
       ),
@@ -1609,7 +1638,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     Icon(
                       Icons.mic,
-                      color: accent,
+                      color: const Color(0xFF075E54),
                     ),
                     const SizedBox(width: 8),
                     const Expanded(
@@ -1684,9 +1713,7 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Container(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withValues(
-                        alpha: 0.96,
-                      ),
+                  color: const Color(0xFFF0F0F0),
                   border: Border(
                     top: BorderSide(
                       color: Theme.of(context)
@@ -1702,7 +1729,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       tooltip: 'Прикрепить файлы',
                       onPressed:
                           _sending || _recording ? null : _openInternalFileManager,
-                      color: accent,
+                      color: const Color(0xFF075E54),
                       icon: const Icon(Icons.attach_file),
                     ),
                     IconButton(
@@ -1725,17 +1752,24 @@ class _ChatScreenState extends State<ChatScreen> {
                         },
                         decoration: InputDecoration(
                           hintText: 'Сообщение',
+                          filled: true,
+                          fillColor: Colors.white,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
                           ),
                           isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 11,
+                          ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     IconButton.filled(
                       style: IconButton.styleFrom(
-                        backgroundColor: accent,
+                        backgroundColor: const Color(0xFF075E54),
                         foregroundColor: Colors.white,
                       ),
                       onPressed:
