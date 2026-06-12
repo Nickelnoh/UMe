@@ -20,6 +20,9 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscurePassword = true;
 
+  static const _green = Color(0xFF075E54);
+  static const _lightGreen = Color(0xFF128C7E);
+
   @override
   void dispose() {
     _usernameController.dispose();
@@ -70,10 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      TopNotification.success(
-        context,
-        message: 'Вы вошли в аккаунт',
-      );
+      TopNotification.success(context, message: 'Вы вошли в аккаунт');
 
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const ChatsScreen()),
@@ -89,139 +89,173 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   String _cleanError(Object e) {
-    var text = e.toString();
-    text = text.replaceFirst('Exception: ', '');
+    var text = e.toString().replaceFirst('Exception: ', '');
 
-    if (text.contains('Invalid username or password')) {
-      return 'Неверный username или пароль';
-    }
-
-    if (text.contains('Failed to fetch')) {
-      return 'Не удалось подключиться к серверу';
-    }
-
-    if (text.contains('TimeoutException')) {
-      return 'Сервер не ответил вовремя';
-    }
-
-    if (text.contains('422')) {
-      return 'Некорректные данные входа';
-    }
+    if (text.contains('Failed to fetch')) return 'Не удалось подключиться к серверу';
+    if (text.contains('TimeoutException')) return 'Сервер не ответил вовремя';
+    if (text.contains('Invalid username or password')) return 'Неверный username или пароль';
 
     return text;
   }
 
   void _showError(String message) {
     if (!mounted) return;
-
-    TopNotification.error(
-      context,
-      message: message,
-    );
-  }
-
-  Future<void> _openRegister() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const RegisterScreen()),
-    );
+    TopNotification.error(context, message: message);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Вход'),
-      ),
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 430),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 34),
+              decoration: const BoxDecoration(
+                color: _green,
+              ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.lock_outline,
-                    size: 72,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'UMe Messenger',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Войдите по username и паролю',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: _usernameController,
-                    enabled: !_loading,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Username',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordController,
-                    enabled: !_loading,
-                    obscureText: _obscurePassword,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) {
-                      if (!_loading) _login();
-                    },
-                    decoration: InputDecoration(
-                      labelText: 'Пароль',
-                      prefixIcon: const Icon(Icons.password),
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        onPressed: _loading
-                            ? null
-                            : () {
-                                setState(() {
-                                  _obscurePassword = !_obscurePassword;
-                                });
-                              },
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility
-                              : Icons.visibility_off,
+                  Row(
+                    children: [
+                      Container(
+                        width: 54,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.16),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.chat_rounded, color: Colors.white, size: 30),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'UMe',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Private messenger',
+                              style: TextStyle(color: Color(0xFFDCEFEA), fontWeight: FontWeight.w600),
+                            ),
+                          ],
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'Вход в аккаунт',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: FilledButton(
-                      onPressed: _loading ? null : _login,
-                      child: _loading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Войти'),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Введите данные, чтобы открыть чаты',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontWeight: FontWeight.w500,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: _loading ? null : _openRegister,
-                    child: const Text('Создать аккаунт'),
                   ),
                 ],
               ),
             ),
-          ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(18, 22, 18, 28),
+                children: [
+                  Card(
+                    margin: EdgeInsets.zero,
+                    color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            controller: _usernameController,
+                            enabled: !_loading,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Username',
+                              prefixIcon: Icon(Icons.alternate_email_rounded),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _passwordController,
+                            enabled: !_loading,
+                            obscureText: _obscurePassword,
+                            onSubmitted: (_) => _loading ? null : _login(),
+                            decoration: InputDecoration(
+                              labelText: 'Пароль',
+                              prefixIcon: const Icon(Icons.lock_outline_rounded),
+                              suffixIcon: IconButton(
+                                onPressed: _loading
+                                    ? null
+                                    : () => setState(() => _obscurePassword = !_obscurePassword),
+                                icon: Icon(
+                                  _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          FilledButton(
+                            onPressed: _loading ? null : _login,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _green,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Text('ВОЙТИ', style: TextStyle(fontWeight: FontWeight.w800)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Center(
+                    child: TextButton(
+                      onPressed: _loading
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                              );
+                            },
+                      child: const Text(
+                        'Создать новый аккаунт',
+                        style: TextStyle(color: _lightGreen, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -167,11 +167,15 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
+    const green = Color(0xFF075E54);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD),
       appBar: AppBar(
         title: const Text('Новая группа'),
+        backgroundColor: green,
+        foregroundColor: Colors.white,
         actions: [
           TextButton(
             onPressed: _creating ? null : _createGroup,
@@ -179,92 +183,123 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
-                : const Text('Создать'),
+                : const Text(
+                    'ГОТОВО',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
+                  ),
           ),
         ],
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: EdgeInsets.zero,
           children: [
-            TextField(
-              controller: _titleController,
-              enabled: !_creating,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Название группы',
-                prefixIcon: Icon(Icons.groups_2_outlined),
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (_selected.isNotEmpty) ...[
-              Text(
-                'Участники: ${_selected.length}',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _selected.entries.map((entry) {
-                  final user = entry.value;
-                  final title = _userTitle(user);
-                  final avatarUrl = user['avatar_url']?.toString();
-
-                  return InputChip(
-                    avatar: CircleAvatar(
-                      backgroundColor: accent.withValues(alpha: 0.15),
-                      backgroundImage: avatarUrl == null || avatarUrl.isEmpty
-                          ? null
-                          : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
-                      child: avatarUrl == null || avatarUrl.isEmpty
-                          ? Text(title.characters.first.toUpperCase())
-                          : null,
-                    ),
-                    label: Text(title),
-                    onDeleted: _creating
-                        ? null
-                        : () {
-                            setState(() => _selected.remove(entry.key));
-                          },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 18),
-            ],
-            TextField(
-              controller: _searchController,
-              enabled: !_creating,
-              onChanged: _onSearchChanged,
-              decoration: InputDecoration(
-                labelText: 'Найти пользователей',
-                hintText: 'Username, никнейм или имя',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searching
-                    ? const Padding(
-                        padding: EdgeInsets.all(14),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+            Container(
+              color: green,
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+              child: Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 31,
+                    backgroundColor: Colors.white,
+                    foregroundColor: green,
+                    child: Icon(Icons.groups_rounded, size: 33),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: TextField(
+                      controller: _titleController,
+                      enabled: !_creating,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                      cursorColor: Colors.white,
+                      decoration: InputDecoration(
+                        hintText: 'Название группы',
+                        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
+                        filled: false,
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.45)),
                         ),
-                      )
-                    : null,
-                border: const OutlineInputBorder(),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
+            if (_selected.isNotEmpty)
+              Container(
+                color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Участники: ${_selected.length}',
+                      style: const TextStyle(color: Color(0xFF075E54), fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _selected.entries.map((entry) {
+                        final user = entry.value;
+                        final title = _userTitle(user);
+                        final avatarUrl = user['avatar_url']?.toString();
+
+                        return InputChip(
+                          backgroundColor: const Color(0xFFE7F6F2),
+                          avatar: CircleAvatar(
+                            backgroundColor: green,
+                            foregroundColor: Colors.white,
+                            backgroundImage: avatarUrl == null || avatarUrl.isEmpty
+                                ? null
+                                : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
+                            child: avatarUrl == null || avatarUrl.isEmpty
+                                ? Text(title.characters.first.toUpperCase())
+                                : null,
+                          ),
+                          label: Text(title),
+                          onDeleted: _creating ? null : () => setState(() => _selected.remove(entry.key)),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              child: TextField(
+                controller: _searchController,
+                enabled: !_creating,
+                onChanged: _onSearchChanged,
+                decoration: InputDecoration(
+                  labelText: 'Найти пользователей',
+                  hintText: 'Username, никнейм или имя',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _searching
+                      ? const Padding(
+                          padding: EdgeInsets.all(14),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+            ),
             if (_results.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 64),
+                padding: const EdgeInsets.only(top: 72),
                 child: Center(
                   child: Text(
-                    _searchController.text.trim().length < 2
-                        ? 'Введите минимум 2 символа'
-                        : 'Ничего не найдено',
+                    _searchController.text.trim().length < 2 ? 'Введите минимум 2 символа' : 'Ничего не найдено',
+                    style: const TextStyle(color: Color(0xFF667781), fontWeight: FontWeight.w600),
                   ),
                 ),
               )
@@ -277,25 +312,54 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 final username = user['username']?.toString() ?? '';
                 final avatarUrl = user['avatar_url']?.toString();
 
-                return Card(
-                  child: ListTile(
+                return Material(
+                  color: isDark ? const Color(0xFF0B141A) : Colors.white,
+                  child: InkWell(
                     onTap: _creating ? null : () => _toggleUser(user),
-                    leading: CircleAvatar(
-                      backgroundColor: accent.withValues(alpha: 0.15),
-                      backgroundImage: avatarUrl == null || avatarUrl.isEmpty
-                          ? null
-                          : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
-                      child: avatarUrl == null || avatarUrl.isEmpty
-                          ? Text(title.characters.first.toUpperCase())
-                          : null,
-                    ),
-                    title: Text(title),
-                    subtitle: username.isEmpty ? null : Text('@$username'),
-                    trailing: Icon(
-                      selected
-                          ? Icons.check_circle
-                          : Icons.add_circle_outline,
-                      color: selected ? accent : null,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 9, 12, 0),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: const Color(0xFFE2F0EC),
+                            foregroundColor: green,
+                            backgroundImage: avatarUrl == null || avatarUrl.isEmpty
+                                ? null
+                                : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
+                            child: avatarUrl == null || avatarUrl.isEmpty
+                                ? Text(title.characters.first.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900))
+                                : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              decoration: const BoxDecoration(
+                                border: Border(bottom: BorderSide(color: Color(0xFFEAEAEA))),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.8)),
+                                        if (username.isNotEmpty)
+                                          Text('@$username', style: const TextStyle(color: Color(0xFF667781))),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    selected ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
+                                    color: selected ? green : const Color(0xFF667781),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
