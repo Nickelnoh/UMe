@@ -13,10 +13,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const _green = Color(0xFF075E54);
-  static const _lightGreen = Color(0xFF128C7E);
-  static const _waBackground = Color(0xFFECE5DD);
-
   bool _loading = true;
   bool _saving = false;
 
@@ -54,14 +50,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!mounted) return;
 
+      final nextTheme = me['theme']?.toString() ?? 'system';
+      final nextAccent = me['accent_color']?.toString() ?? '#075E54';
+
+      themeModeNotifier.value = parseUmeThemeMode(nextTheme);
+      accentColorNotifier.value = parseUmeAccentColor(nextAccent);
+
       setState(() {
         _username = me['username']?.toString() ?? '';
         _nickname = me['nickname']?.toString() ?? '';
         _displayName = me['display_name']?.toString() ?? '';
         _avatarUrl = me['avatar_url']?.toString();
 
-        _theme = me['theme']?.toString() ?? 'system';
-        _accentColor = me['accent_color']?.toString() ?? '#075E54';
+        _theme = nextTheme;
+        _accentColor = nextAccent;
         _chatWallpaper = me['chat_wallpaper']?.toString() ?? 'default';
         _bubbleStyle = me['bubble_style']?.toString() ?? 'rounded';
 
@@ -116,11 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saving = true;
     });
 
-    themeModeNotifier.value = switch (value) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
-    };
+    themeModeNotifier.value = parseUmeThemeMode(value);
 
     try {
       await ApiClient.post('/settings/theme', {'theme': value});
@@ -149,6 +147,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saving = true;
     });
 
+    accentColorNotifier.value = parseUmeAccentColor(nextAccent);
+
     try {
       await ApiClient.post(
         '/settings/chat-appearance',
@@ -160,7 +160,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       if (!mounted) return;
-      TopNotification.success(context, message: 'Внешний вид сохранён');
+      TopNotification.success(context, message: 'Вид сообщений сохранён');
     } catch (e) {
       _showError(_cleanError(e));
     } finally {
@@ -177,8 +177,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
 
+      final file = result.files.first;
       if (file.bytes == null) {
         _showError('Не удалось прочитать изображение');
         return;
@@ -211,8 +211,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
 
+      final file = result.files.first;
       if (file.bytes == null) {
         _showError('Не удалось прочитать изображение');
         return;
@@ -233,7 +233,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!mounted) return;
       setState(() => _chatWallpaper = wallpaperUrl);
-      TopNotification.success(context, message: 'Фон чата обновлён');
+      TopNotification.success(context, message: 'Фон сообщений обновлён');
     } catch (e) {
       _showError(_cleanError(e));
     } finally {
@@ -242,10 +242,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _cleanError(Object e) {
-    var text = e.toString().replaceFirst('Exception: ', '');
+    var text = e.toString();
+    text = text.replaceFirst('Exception: ', '');
+
     if (text.contains('Failed to fetch')) return 'Не удалось подключиться к серверу';
     if (text.contains('TimeoutException')) return 'Сервер не ответил вовремя';
     if (text.contains('Nickname already exists')) return 'Никнейм уже занят';
+
     return text;
   }
 
@@ -254,35 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     TopNotification.error(context, message: message);
   }
 
-  Color _accentColorValue(String value) {
-    final parsed = _parseAccentColor(value);
-    if (parsed != null) return parsed;
-
-    switch (value) {
-      case 'green':
-        return _green;
-      case 'purple':
-        return Colors.purple;
-      case 'orange':
-        return Colors.orange;
-      case 'pink':
-        return Colors.pink;
-      case 'blue':
-      default:
-        return Colors.blue;
-    }
-  }
-
-  Color? _parseAccentColor(String value) {
-    final text = value.trim();
-    if (!text.startsWith('#')) return null;
-    final hex = text.substring(1);
-    if (hex.length != 6 && hex.length != 8) return null;
-    final parsed = int.tryParse(hex, radix: 16);
-    if (parsed == null) return null;
-    if (hex.length == 6) return Color(0xFF000000 | parsed);
-    return Color(parsed);
-  }
+  Color _accentColorValue(String value) => parseUmeAccentColor(value);
 
   String _colorToHex(Color color) {
     final value = color.toARGB32() & 0x00FFFFFF;
@@ -290,16 +265,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _openAccentColorPicker() async {
+    final initialColor = _accentColorValue(_accentColor);
+
     final selected = await showModalBottomSheet<Color>(
       context: context,
-      showDragHandle: true,
       isScrollControlled: true,
-      builder: (_) => _AccentColorPickerSheet(
-        initialColor: _accentColorValue(_accentColor),
-      ),
+      showDragHandle: true,
+      builder: (_) => _AccentColorPickerSheet(initialColor: initialColor),
     );
 
     if (selected == null) return;
+
     await _saveChatAppearance(accentColor: _colorToHex(selected));
   }
 
@@ -309,263 +285,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _chatWallpaper.startsWith('https://');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final avatar = _avatarUrl == null || _avatarUrl!.isEmpty ? null : ApiClient.absoluteUrl(_avatarUrl);
-    final name = _displayName.isNotEmpty ? _displayName : (_nickname.isNotEmpty ? _nickname : _username);
-
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B141A) : _waBackground,
-      appBar: AppBar(
-        title: const Text('Настройки'),
-        backgroundColor: _green,
-        foregroundColor: Colors.white,
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(0, 0, 0, 28),
-                children: [
-                  Container(
-                    color: _green,
-                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 22),
-                    child: Row(
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            CircleAvatar(
-                              radius: 36,
-                              backgroundColor: Colors.white,
-                              foregroundColor: _green,
-                              backgroundImage: avatar == null ? null : NetworkImage(avatar),
-                              child: avatar == null
-                                  ? Text(
-                                      name.isNotEmpty ? name.characters.first.toUpperCase() : 'U',
-                                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
-                                    )
-                                  : null,
-                            ),
-                            Positioned(
-                              right: -8,
-                              bottom: -8,
-                              child: IconButton.filled(
-                                onPressed: _saving ? null : _pickAvatar,
-                                style: IconButton.styleFrom(
-                                  backgroundColor: _lightGreen,
-                                  foregroundColor: Colors.white,
-                                ),
-                                icon: const Icon(Icons.photo_camera_rounded, size: 18),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                name.isEmpty ? 'UMe user' : name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _username.isEmpty ? 'аккаунт UMe' : '@$_username',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.78),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _SettingsSection(
-                    title: 'Профиль',
-                    children: [
-                      _SettingsTextField(
-                        controller: _nicknameController,
-                        enabled: !_saving,
-                        label: 'Никнейм',
-                        icon: Icons.badge_outlined,
-                      ),
-                      const SizedBox(height: 10),
-                      _SettingsTextField(
-                        controller: _displayNameController,
-                        enabled: !_saving,
-                        label: 'Отображаемое имя',
-                        icon: Icons.person_outline_rounded,
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _saving ? null : _saveProfile,
-                          icon: const Icon(Icons.check_rounded),
-                          label: const Text('СОХРАНИТЬ ПРОФИЛЬ'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  _SettingsSection(
-                    title: 'Настройки приложения',
-                    children: [
-                      _SettingsChoiceTile(
-                        icon: Icons.brightness_6_rounded,
-                        title: 'Тема',
-                        subtitle: _themeLabel(_theme),
-                        child: SegmentedButton<String>(
-                          selected: {_theme},
-                          showSelectedIcon: false,
-                          onSelectionChanged: _saving ? null : (value) => _saveTheme(value.first),
-                          segments: const [
-                            ButtonSegment(value: 'system', label: Text('Система')),
-                            ButtonSegment(value: 'light', label: Text('Светлая')),
-                            ButtonSegment(value: 'dark', label: Text('Тёмная')),
-                          ],
-                        ),
-                      ),
-                      const _SettingsDivider(),
-                      _SettingsChoiceTile(
-                        icon: Icons.notifications_active_outlined,
-                        title: 'Уведомления',
-                        subtitle: 'Управляются через разрешения браузера/Android',
-                      ),
-                      const _SettingsDivider(),
-                      _SettingsChoiceTile(
-                        icon: Icons.lock_outline_rounded,
-                        title: 'Приватность',
-                        subtitle: 'Личные чаты и сессия защищены токеном входа',
-                      ),
-                    ],
-                  ),
-                  _SettingsSection(
-                    title: 'Внешний вид чатов',
-                    children: [
-                      _SettingsChoiceTile(
-                        icon: Icons.palette_outlined,
-                        title: 'Цвет акцента',
-                        subtitle: _colorToHex(_accentColorValue(_accentColor)),
-                        trailing: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: _accentColorValue(_accentColor),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        onTap: _saving ? null : _openAccentColorPicker,
-                      ),
-                      const _SettingsDivider(),
-                      _SettingsChoiceTile(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        title: 'Пузыри сообщений',
-                        subtitle: _bubbleLabel(_bubbleStyle),
-                        child: SegmentedButton<String>(
-                          selected: {_bubbleStyle},
-                          showSelectedIcon: false,
-                          onSelectionChanged: _saving
-                              ? null
-                              : (value) => _saveChatAppearance(bubbleStyle: value.first),
-                          segments: const [
-                            ButtonSegment(value: 'rounded', label: Text('Круглые')),
-                            ButtonSegment(value: 'soft', label: Text('Мягкие')),
-                            ButtonSegment(value: 'compact', label: Text('Компакт')),
-                          ],
-                        ),
-                      ),
-                      const _SettingsDivider(),
-                      _SettingsChoiceTile(
-                        icon: Icons.wallpaper_rounded,
-                        title: 'Фон сообщений',
-                        subtitle: _wallpaperLabel(_chatWallpaper),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _WallpaperButton(
-                            label: 'Обычный',
-                            selected: _chatWallpaper == 'default',
-                            onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'default'),
-                          ),
-                          _WallpaperButton(
-                            label: 'Чистый',
-                            selected: _chatWallpaper == 'clean',
-                            onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'clean'),
-                          ),
-                          _WallpaperButton(
-                            label: 'Градиент',
-                            selected: _chatWallpaper == 'gradient',
-                            onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'gradient'),
-                          ),
-                          _WallpaperButton(
-                            label: 'Ночь',
-                            selected: _chatWallpaper == 'night',
-                            onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'night'),
-                          ),
-                          _WallpaperButton(
-                            label: 'Мята',
-                            selected: _chatWallpaper == 'mint',
-                            onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'mint'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _WallpaperPreview(
-                        value: _chatWallpaper,
-                        accent: _accentColorValue(_accentColor),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _saving ? null : _pickChatWallpaperImage,
-                        icon: const Icon(Icons.image_outlined),
-                        label: Text(_isCustomWallpaper ? 'Заменить свою картинку' : 'Поставить свою картинку'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-
   String _themeLabel(String value) {
     switch (value) {
       case 'light':
         return 'Светлая';
       case 'dark':
         return 'Тёмная';
+      case 'system':
       default:
         return 'Как в системе';
     }
   }
 
-  String _bubbleLabel(String value) {
-    switch (value) {
-      case 'soft':
-        return 'Мягкие';
-      case 'compact':
-        return 'Компактные';
-      default:
-        return 'Круглые';
-    }
-  }
-
   String _wallpaperLabel(String value) {
     if (_isCustomWallpaper) return 'Своя картинка';
+
     switch (value) {
       case 'clean':
         return 'Чистый';
@@ -575,44 +309,278 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return 'Ночь';
       case 'mint':
         return 'Мята';
+      case 'default':
       default:
         return 'Обычный';
     }
   }
-}
-
-class _SettingsSection extends StatelessWidget {
-  final String title;
-  final List<Widget> children;
-
-  const _SettingsSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColorValue(_accentColor);
+    final avatar = _avatarUrl == null || _avatarUrl!.isEmpty
+        ? null
+        : ApiClient.absoluteUrl(_avatarUrl);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1F2C34) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _OldWhatsSettingsHeader(
+                  title: 'Настройки',
+                  subtitle: _username.isEmpty ? 'UMe' : '@$_username',
+                  accent: accent,
+                  onBack: () => Navigator.of(context).pop(),
+                ),
+                Expanded(
+                  child: SafeArea(
+                    top: false,
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+                      children: [
+                        _OldWhatsSettingsSection(
+                          title: 'Профиль',
+                          children: [
+                            _ProfileTile(
+                              avatarUrl: avatar,
+                              name: _displayName.isNotEmpty ? _displayName : _nickname,
+                              username: _username,
+                              accent: accent,
+                              onAvatarTap: _saving ? null : _pickAvatar,
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _nicknameController,
+                              enabled: !_saving,
+                              decoration: const InputDecoration(
+                                labelText: 'Никнейм',
+                                prefixIcon: Icon(Icons.badge_outlined),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _displayNameController,
+                              enabled: !_saving,
+                              decoration: const InputDecoration(
+                                labelText: 'Отображаемое имя',
+                                prefixIcon: Icon(Icons.person_outline),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: _saving ? null : _saveProfile,
+                              icon: const Icon(Icons.save_outlined),
+                              label: const Text('Сохранить профиль'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _OldWhatsSettingsSection(
+                          title: 'Настройки приложения',
+                          children: [
+                            _SettingsInfoTile(
+                              icon: Icons.dark_mode_outlined,
+                              title: 'Тема',
+                              subtitle: _themeLabel(_theme),
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 10),
+                            _ChoiceRow<String>(
+                              selected: _theme,
+                              enabled: !_saving,
+                              values: const ['system', 'light', 'dark'],
+                              labels: const {
+                                'system': 'Система',
+                                'light': 'Светлая',
+                                'dark': 'Тёмная',
+                              },
+                              onChanged: _saveTheme,
+                            ),
+                            const SizedBox(height: 14),
+                            _SettingsInfoTile(
+                              icon: Icons.notifications_none_rounded,
+                              title: 'Уведомления',
+                              subtitle: 'Push включается на главном экране',
+                              accent: accent,
+                            ),
+                            _SettingsInfoTile(
+                              icon: Icons.lock_outline_rounded,
+                              title: 'Приватность',
+                              subtitle: 'Личные чаты и приватный доступ',
+                              accent: accent,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _OldWhatsSettingsSection(
+                          title: 'Внешний вид сообщений',
+                          children: [
+                            _SettingsInfoTile(
+                              icon: Icons.palette_outlined,
+                              title: 'Акцентный цвет',
+                              subtitle: _colorToHex(accent),
+                              accent: accent,
+                              trailing: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: accent,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isDark ? Colors.white24 : Colors.black12,
+                                  ),
+                                ),
+                              ),
+                              onTap: _saving ? null : _openAccentColorPicker,
+                            ),
+                            const SizedBox(height: 12),
+                            _SettingsInfoTile(
+                              icon: Icons.chat_bubble_outline_rounded,
+                              title: 'Стиль сообщений',
+                              subtitle: _bubbleStyle,
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 10),
+                            _ChoiceRow<String>(
+                              selected: _bubbleStyle,
+                              enabled: !_saving,
+                              values: const ['rounded', 'soft', 'compact'],
+                              labels: const {
+                                'rounded': 'Круглый',
+                                'soft': 'Мягкий',
+                                'compact': 'Компакт',
+                              },
+                              onChanged: (value) => _saveChatAppearance(bubbleStyle: value),
+                            ),
+                            const SizedBox(height: 18),
+                            _SettingsInfoTile(
+                              icon: Icons.image_outlined,
+                              title: 'Фон сообщений',
+                              subtitle: _wallpaperLabel(_chatWallpaper),
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 10),
+                            _WallpaperOptionTile(
+                              title: 'Обычный',
+                              subtitle: 'Светлый классический фон',
+                              value: 'default',
+                              selected: _chatWallpaper == 'default',
+                              accent: accent,
+                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'default'),
+                            ),
+                            _WallpaperOptionTile(
+                              title: 'Чистый',
+                              subtitle: 'Без лишнего рисунка',
+                              value: 'clean',
+                              selected: _chatWallpaper == 'clean',
+                              accent: accent,
+                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'clean'),
+                            ),
+                            _WallpaperOptionTile(
+                              title: 'Градиент',
+                              subtitle: 'Мягкий цветовой переход',
+                              value: 'gradient',
+                              selected: _chatWallpaper == 'gradient',
+                              accent: accent,
+                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'gradient'),
+                            ),
+                            _WallpaperOptionTile(
+                              title: 'Ночь',
+                              subtitle: 'Тёмный фон сообщений',
+                              value: 'night',
+                              selected: _chatWallpaper == 'night',
+                              accent: accent,
+                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'night'),
+                            ),
+                            _WallpaperOptionTile(
+                              title: 'Мята',
+                              subtitle: 'Светлый зелёный оттенок',
+                              value: 'mint',
+                              selected: _chatWallpaper == 'mint',
+                              accent: accent,
+                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'mint'),
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: _saving ? null : _pickChatWallpaperImage,
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              label: Text(
+                                _isCustomWallpaper ? 'Заменить свою картинку' : 'Поставить свою картинку',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _OldWhatsSettingsHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Color accent;
+  final VoidCallback onBack;
+
+  const _OldWhatsSettingsHeader({
+    required this.title,
+    required this.subtitle,
+    required this.accent,
+    required this.onBack,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, HSLColor.fromColor(accent).withLightness(0.40).toColor()],
         ),
+      ),
+      child: SafeArea(
+        bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.fromLTRB(4, 8, 12, 12),
+          child: Row(
             children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Color(0xFF075E54),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
+              IconButton(
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back_rounded),
+                color: Colors.white,
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.80),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              ...children,
             ],
           ),
         ),
@@ -621,109 +589,384 @@ class _SettingsSection extends StatelessWidget {
   }
 }
 
-class _SettingsTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final bool enabled;
-  final String label;
-  final IconData icon;
+class _OldWhatsSettingsSection extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
 
-  const _SettingsTextField({
-    required this.controller,
-    required this.enabled,
-    required this.label,
-    required this.icon,
-  });
+  const _OldWhatsSettingsSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      enabled: enabled,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.6)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title.toUpperCase(),
+              style: TextStyle(
+                color: theme.colorScheme.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...children,
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SettingsChoiceTile extends StatelessWidget {
+class _ProfileTile extends StatelessWidget {
+  final String? avatarUrl;
+  final String name;
+  final String username;
+  final Color accent;
+  final VoidCallback? onAvatarTap;
+
+  const _ProfileTile({
+    required this.avatarUrl,
+    required this.name,
+    required this.username,
+    required this.accent,
+    required this.onAvatarTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final title = name.trim().isEmpty ? 'UMe user' : name.trim();
+
+    return Row(
+      children: [
+        InkWell(
+          onTap: onAvatarTap,
+          customBorder: const CircleBorder(),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              CircleAvatar(
+                radius: 34,
+                backgroundColor: accent.withValues(alpha: 0.16),
+                backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl!),
+                foregroundColor: accent,
+                child: avatarUrl == null
+                    ? Text(
+                        title.characters.first.toUpperCase(),
+                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                      )
+                    : null,
+              ),
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: CircleAvatar(
+                  radius: 13,
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  child: const Icon(Icons.photo_camera_outlined, size: 15),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              if (username.isNotEmpty)
+                Text(
+                  '@$username',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsInfoTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? child;
+  final Color accent;
   final Widget? trailing;
   final VoidCallback? onTap;
 
-  const _SettingsChoiceTile({
+  const _SettingsInfoTile({
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.child,
+    required this.accent,
     this.trailing,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final body = Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: const Color(0xFF075E54)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
+              Icon(icon, color: accent, size: 25),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       title,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                     ),
-                  ),
-                  if (trailing != null) trailing!,
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                style: const TextStyle(color: Color(0xFF667781), fontWeight: FontWeight.w500),
-              ),
-              if (child != null) ...[
-                const SizedBox(height: 10),
-                child!,
-              ],
+              if (trailing != null) trailing!,
             ],
           ),
         ),
-      ],
-    );
-
-    if (onTap == null) {
-      return body;
-    }
-
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: body,
       ),
     );
   }
 }
 
-class _SettingsDivider extends StatelessWidget {
-  const _SettingsDivider();
+class _ChoiceRow<T> extends StatelessWidget {
+  final T selected;
+  final bool enabled;
+  final List<T> values;
+  final Map<T, String> labels;
+  final ValueChanged<T> onChanged;
+
+  const _ChoiceRow({
+    required this.selected,
+    required this.enabled,
+    required this.values,
+    required this.labels,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 12),
-      child: Divider(height: 1, color: Color(0xFFE9E9E9)),
+    final theme = Theme.of(context);
+    final accent = theme.colorScheme.primary;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: values.map((value) {
+        final isSelected = value == selected;
+
+        return ChoiceChip(
+          selected: isSelected,
+          label: Text(labels[value] ?? value.toString()),
+          onSelected: enabled ? (_) => onChanged(value) : null,
+          selectedColor: accent.withValues(alpha: 0.18),
+          checkmarkColor: accent,
+          side: BorderSide(
+            color: isSelected ? accent : theme.dividerColor,
+          ),
+          labelStyle: TextStyle(
+            color: isSelected ? accent : theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w800,
+          ),
+        );
+      }).toList(),
     );
+  }
+}
+
+class _WallpaperOptionTile extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String value;
+  final bool selected;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  const _WallpaperOptionTile({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.selected,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: selected ? accent.withValues(alpha: 0.11) : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: selected ? accent : theme.dividerColor,
+            ),
+          ),
+          child: Row(
+            children: [
+              _WallpaperMiniPreview(value: value, accent: accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle_rounded, color: accent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WallpaperMiniPreview extends StatelessWidget {
+  final String value;
+  final Color accent;
+
+  const _WallpaperMiniPreview({required this.value, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: _decoration(context),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 6,
+            top: 9,
+            child: Container(
+              width: 20,
+              height: 9,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 6,
+            bottom: 9,
+            child: Container(
+              width: 22,
+              height: 9,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.80),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  BoxDecoration _decoration(BuildContext context) {
+    switch (value) {
+      case 'clean':
+        return BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Theme.of(context).dividerColor),
+        );
+      case 'gradient':
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [accent.withValues(alpha: 0.42), Colors.white, accent.withValues(alpha: 0.18)],
+          ),
+        );
+      case 'night':
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF0F172A), Color(0xFF1E1B4B)],
+          ),
+        );
+      case 'mint':
+        return BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: const LinearGradient(
+            colors: [Color(0xFFE8FFF5), Color(0xFFF6FFFB)],
+          ),
+        );
+      case 'default':
+      default:
+        return BoxDecoration(
+          color: const Color(0xFFECE5DD),
+          borderRadius: BorderRadius.circular(10),
+        );
+    }
   }
 }
 
@@ -770,36 +1013,86 @@ class _AccentColorPickerSheetState extends State<_AccentColorPickerSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Палитра цвета', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            Text(
+              'Акцентный цвет',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 14),
-            Container(
-              height: 92,
-              padding: const EdgeInsets.all(16),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              height: 112,
+              padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
                 color: _color,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.color_lens_outlined, color: textColor, size: 32),
-                  const SizedBox(width: 12),
-                  Text(
-                    _hex(_color),
-                    style: TextStyle(color: textColor, fontSize: 24, fontWeight: FontWeight.w900),
+                  Icon(Icons.color_lens_outlined, color: textColor, size: 34),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Будущий цвет',
+                          style: TextStyle(color: textColor.withValues(alpha: 0.82), fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          _hex(_color),
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 14),
-            _ColorSlider(label: 'Оттенок', value: _hue, min: 0, max: 360, onChanged: (v) => setState(() => _hue = v)),
-            _ColorSlider(label: 'Насыщенность', value: _saturation, min: 0, max: 1, onChanged: (v) => setState(() => _saturation = v)),
-            _ColorSlider(label: 'Яркость', value: _value, min: 0.15, max: 1, onChanged: (v) => setState(() => _value = v)),
+            const SizedBox(height: 18),
+            _ColorSlider(
+              label: 'Оттенок',
+              value: _hue,
+              min: 0,
+              max: 360,
+              onChanged: (value) => setState(() => _hue = value),
+            ),
+            _ColorSlider(
+              label: 'Насыщенность',
+              value: _saturation,
+              min: 0,
+              max: 1,
+              onChanged: (value) => setState(() => _saturation = value),
+            ),
+            _ColorSlider(
+              label: 'Яркость',
+              value: _value,
+              min: 0.15,
+              max: 1,
+              onChanged: (value) => setState(() => _value = value),
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(null), child: const Text('Отмена'))),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(null),
+                    child: const Text('Отмена'),
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(_color), child: const Text('Применить'))),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.of(context).pop(_color),
+                    icon: const Icon(Icons.check),
+                    label: const Text('Применить'),
+                  ),
+                ),
               ],
             ),
           ],
@@ -831,114 +1124,17 @@ class _ColorSlider extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700))),
-            Text(max == 360 ? value.round().toString() : '${(value * 100).round()}%'),
+            Expanded(
+              child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+            ),
+            Text(
+              max == 360 ? value.round().toString() : '${(value * 100).round()}%',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
           ],
         ),
         Slider(value: value, min: min, max: max, onChanged: onChanged),
       ],
-    );
-  }
-}
-
-class _WallpaperButton extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback? onTap;
-
-  const _WallpaperButton({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      selected: selected,
-      label: Text(label),
-      onSelected: onTap == null ? null : (_) => onTap!(),
-      selectedColor: const Color(0xFFD9FDD3),
-    );
-  }
-}
-
-class _WallpaperPreview extends StatelessWidget {
-  final String value;
-  final Color accent;
-
-  const _WallpaperPreview({required this.value, required this.accent});
-
-  bool get _isCustomImage {
-    return value.startsWith('/uploads/') || value.startsWith('http://') || value.startsWith('https://');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 116,
-      decoration: _decoration(context),
-      child: Stack(
-        children: [
-          Positioned(
-            left: 14,
-            top: 14,
-            child: _Bubble(text: 'Привет!', color: Colors.white, textColor: Colors.black87),
-          ),
-          Positioned(
-            right: 14,
-            bottom: 14,
-            child: _Bubble(text: 'Превью фона', color: const Color(0xFFD9FDD3), textColor: Colors.black87),
-          ),
-        ],
-      ),
-    );
-  }
-
-  BoxDecoration _decoration(BuildContext context) {
-    if (_isCustomImage) {
-      return BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        image: DecorationImage(
-          image: NetworkImage(ApiClient.absoluteUrl(value)),
-          fit: BoxFit.cover,
-          colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.22), BlendMode.darken),
-        ),
-      );
-    }
-
-    switch (value) {
-      case 'clean':
-        return BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8));
-      case 'gradient':
-        return BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          gradient: LinearGradient(colors: [accent.withValues(alpha: 0.28), Colors.white]),
-        );
-      case 'night':
-        return BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          gradient: const LinearGradient(colors: [Color(0xFF0B141A), Color(0xFF1F2C34)]),
-        );
-      case 'mint':
-        return BoxDecoration(color: const Color(0xFFE8FFF5), borderRadius: BorderRadius.circular(8));
-      case 'default':
-      default:
-        return BoxDecoration(color: const Color(0xFFECE5DD), borderRadius: BorderRadius.circular(8));
-    }
-  }
-}
-
-class _Bubble extends StatelessWidget {
-  final String text;
-  final Color color;
-  final Color textColor;
-
-  const _Bubble({required this.text, required this.color, required this.textColor});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 180),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
-      child: Text(text, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
     );
   }
 }

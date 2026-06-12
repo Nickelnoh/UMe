@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app.dart';
 import '../../core/api_client.dart';
 import '../../core/onesignal_service.dart';
 import '../../core/secure_storage.dart';
@@ -38,8 +39,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   List<dynamic> _incomingRequests = [];
   List<dynamic> _outgoingRequests = [];
 
-  Color get _whatsAppGreen => const Color(0xFF075E54);
-  Color get _whatsAppFabGreen => const Color(0xFF25D366);
+  Color get _whatsAppGreen => accentColorNotifier.value;
+  Color get _whatsAppFabGreen => accentColorNotifier.value;
 
   @override
   void initState() {
@@ -711,9 +712,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final incomingCount = _incomingRequests.length;
     final green = _whatsAppGreen;
     final list = _visibleChats();
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F7F7),
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Column(
         children: [
           _WhatsTopBar(
@@ -1125,13 +1127,17 @@ class _OldWhatsSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
-      color: const Color(0xFFEFEFEF),
+      color: theme.brightness == Brightness.dark
+          ? const Color(0xFF111B21)
+          : const Color(0xFFEFEFEF),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Text(
         title.toUpperCase(),
-        style: const TextStyle(
-          color: Color(0xFF6F7479),
+        style: TextStyle(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
           fontSize: 12,
           fontWeight: FontWeight.w900,
           letterSpacing: 0.7,
@@ -1163,16 +1169,17 @@ class _RequestListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
+    final theme = Theme.of(context);
 
     return Material(
-      color: Colors.white,
+      color: theme.colorScheme.surface,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 9, 12, 0),
         child: Row(
           children: [
             CircleAvatar(
               radius: 27,
-              backgroundColor: const Color(0xFFE2F0EC),
+              backgroundColor: green.withValues(alpha: 0.14),
               backgroundImage: normalizedAvatar == null
                   ? null
                   : NetworkImage(ApiClient.absoluteUrl(normalizedAvatar)),
@@ -1190,8 +1197,8 @@ class _RequestListTile extends StatelessWidget {
             Expanded(
               child: Container(
                 padding: const EdgeInsets.only(bottom: 12),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: Color(0xFFEAEAEA))),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: theme.dividerColor)),
                 ),
                 child: Row(
                   children: [
@@ -1203,8 +1210,8 @@ class _RequestListTile extends StatelessWidget {
                             name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF111111),
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurface,
                               fontSize: 16.2,
                               fontWeight: FontWeight.w900,
                             ),
@@ -1214,22 +1221,14 @@ class _RequestListTile extends StatelessWidget {
                             username,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF6F7479),
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    if (onCancel != null)
-                      TextButton(
-                        onPressed: onCancel,
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFFD32F2F),
-                        ),
-                        child: const Text('Отменить'),
-                      ),
                     if (onDecline != null)
                       IconButton(
                         onPressed: onDecline,
@@ -1240,6 +1239,11 @@ class _RequestListTile extends StatelessWidget {
                         onPressed: onAccept,
                         color: green,
                         icon: const Icon(Icons.check_rounded),
+                      ),
+                    if (onCancel != null)
+                      TextButton(
+                        onPressed: onCancel,
+                        child: const Text('Отменить'),
                       ),
                   ],
                 ),
@@ -1260,7 +1264,7 @@ class _WhatsChatTile extends StatelessWidget {
   final String? avatarUrl;
   final bool isGroup;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+  final VoidCallback onLongPress;
 
   const _WhatsChatTile({
     required this.green,
@@ -1270,15 +1274,16 @@ class _WhatsChatTile extends StatelessWidget {
     required this.avatarUrl,
     required this.isGroup,
     required this.onTap,
-    this.onLongPress,
+    required this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
     final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
+    final theme = Theme.of(context);
 
     return Material(
-      color: Colors.white,
+      color: theme.colorScheme.surface,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
@@ -1288,7 +1293,7 @@ class _WhatsChatTile extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 27,
-                backgroundColor: const Color(0xFFE2F0EC),
+                backgroundColor: green.withValues(alpha: 0.14),
                 backgroundImage: normalizedAvatar == null
                     ? null
                     : NetworkImage(ApiClient.absoluteUrl(normalizedAvatar)),
@@ -1309,8 +1314,8 @@ class _WhatsChatTile extends StatelessWidget {
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.only(bottom: 12),
-                  decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Color(0xFFEAEAEA))),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: theme.dividerColor)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1323,8 +1328,8 @@ class _WhatsChatTile extends StatelessWidget {
                               title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFF111111),
+                              style: TextStyle(
+                                color: theme.colorScheme.onSurface,
                                 fontSize: 16.2,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -1334,7 +1339,7 @@ class _WhatsChatTile extends StatelessWidget {
                               children: [
                                 Icon(
                                   isGroup ? Icons.groups_2_rounded : Icons.done_all_rounded,
-                                  color: const Color(0xFF8A8F94),
+                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.46),
                                   size: 17,
                                 ),
                                 const SizedBox(width: 4),
@@ -1343,8 +1348,8 @@ class _WhatsChatTile extends StatelessWidget {
                                     subtitle,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Color(0xFF6F7479),
+                                    style: TextStyle(
+                                      color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -1407,18 +1412,18 @@ class _WhatsEmptyChats extends StatelessWidget {
               const SizedBox(height: 18),
               Text(
                 message,
-                style: const TextStyle(
-                  color: Color(0xFF111111),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Откройте меню и добавьте контакт',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Color(0xFF6F7479),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
                   fontWeight: FontWeight.w600,
                 ),
               ),
