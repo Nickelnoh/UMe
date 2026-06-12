@@ -709,94 +709,100 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final incomingCount = _incomingRequests.length;
-    final green = _whatsAppGreen;
-    final list = _visibleChats();
-    final theme = Theme.of(context);
+    return ValueListenableBuilder<Color>(
+      valueListenable: accentColorNotifier,
+      builder: (context, accent, _) {
+        final incomingCount = _incomingRequests.length;
+        final green = accent;
+        final list = _visibleChats();
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final pageColor = isDark ? const Color(0xFF0B141A) : const Color(0xFFF7F7F7);
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          _WhatsTopBar(
-            green: green,
-            name: _myName,
-            chatsCount: _chats.length,
-            incomingCount: incomingCount,
-            selectedTab: _selectedTab,
-            onMenu: _openMobileSideMenu,
-            onChats: () => setState(() => _selectedTab = _ChatsTab.chats),
-            onRequests: () => setState(() => _selectedTab = _ChatsTab.requests),
-            onGroups: () => setState(() => _selectedTab = _ChatsTab.groups),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              color: _whatsAppFabGreen,
-              onRefresh: _refresh,
-              child: _loading
-                  ? ListView(
-                      padding: EdgeInsets.zero,
-                      children: const [
-                        SizedBox(height: 240),
-                        Center(child: CircularProgressIndicator()),
-                      ],
-                    )
-                  : _selectedTab == _ChatsTab.requests
-                      ? _RequestsTabBody(
-                          green: green,
-                          incomingRequests: _incomingRequests,
-                          outgoingRequests: _outgoingRequests,
-                          onAccept: (id) => _acceptRequest(id),
-                          onDecline: (id) => _declineRequest(id),
-                          onCancel: (id) => _cancelRequest(id),
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-                          children: [
-                            if (list.isEmpty)
-                              _WhatsEmptyChats(
-                                green: green,
-                                onFind: _openSearchUsers,
-                                message: _selectedTab == _ChatsTab.groups
-                                    ? 'Групповых чатов пока нет'
-                                    : 'Пока нет чатов',
-                              )
-                            else
-                              ...list.map((item) {
-                                final chat = Map<String, dynamic>.from(item as Map);
-                                final chatId = chat['id']?.toString() ?? '';
-                                final title = chat['title']?.toString() ?? 'Чат';
-                                final avatarUrl = chat['avatar_url']?.toString();
-                                final isGroup = chat['is_group'] == true;
-                                final time = _formatChatTime(
-                                  chat['last_message_created_at']?.toString(),
-                                );
-                                final subtitle = _chatSubtitle(chat);
-
-                                return _WhatsChatTile(
-                                  green: green,
-                                  title: title,
-                                  subtitle: subtitle,
-                                  time: time,
-                                  avatarUrl: avatarUrl,
-                                  isGroup: isGroup,
-                                  onTap: () {
-                                    if (chatId.isEmpty) return;
-                                    _openChat(chatId, title, isGroup: isGroup);
-                                  },
-                                  onLongPress: () => _confirmDeleteChat(
-                                    chatId,
-                                    title,
-                                    isGroup: isGroup,
-                                  ),
-                                );
-                              }),
+        return Scaffold(
+          backgroundColor: pageColor,
+          body: Column(
+            children: [
+              _WhatsTopBar(
+                green: green,
+                name: _myName,
+                chatsCount: _chats.length,
+                incomingCount: incomingCount,
+                selectedTab: _selectedTab,
+                onMenu: _openMobileSideMenu,
+                onChats: () => setState(() => _selectedTab = _ChatsTab.chats),
+                onRequests: () => setState(() => _selectedTab = _ChatsTab.requests),
+                onGroups: () => setState(() => _selectedTab = _ChatsTab.groups),
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  color: green,
+                  onRefresh: _refresh,
+                  child: _loading
+                      ? ListView(
+                          padding: EdgeInsets.zero,
+                          children: const [
+                            SizedBox(height: 240),
+                            Center(child: CircularProgressIndicator()),
                           ],
-                        ),
-            ),
+                        )
+                      : _selectedTab == _ChatsTab.requests
+                          ? _RequestsTabBody(
+                              green: green,
+                              incomingRequests: _incomingRequests,
+                              outgoingRequests: _outgoingRequests,
+                              onAccept: (id) => _acceptRequest(id),
+                              onDecline: (id) => _declineRequest(id),
+                              onCancel: (id) => _cancelRequest(id),
+                            )
+                          : ListView(
+                              padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
+                              children: [
+                                if (list.isEmpty)
+                                  _WhatsEmptyChats(
+                                    green: green,
+                                    onFind: _openSearchUsers,
+                                    message: _selectedTab == _ChatsTab.groups
+                                        ? 'Групповых чатов пока нет'
+                                        : 'Пока нет чатов',
+                                  )
+                                else
+                                  ...list.map((item) {
+                                    final chat = Map<String, dynamic>.from(item as Map);
+                                    final chatId = chat['id']?.toString() ?? '';
+                                    final title = chat['title']?.toString() ?? 'Чат';
+                                    final avatarUrl = chat['avatar_url']?.toString();
+                                    final isGroup = chat['is_group'] == true;
+                                    final time = _formatChatTime(
+                                      chat['last_message_created_at']?.toString(),
+                                    );
+                                    final subtitle = _chatSubtitle(chat);
+
+                                    return _WhatsChatTile(
+                                      green: green,
+                                      title: title,
+                                      subtitle: subtitle,
+                                      time: time,
+                                      avatarUrl: avatarUrl,
+                                      isGroup: isGroup,
+                                      onTap: () {
+                                        if (chatId.isEmpty) return;
+                                        _openChat(chatId, title, isGroup: isGroup);
+                                      },
+                                      onLongPress: () => _confirmDeleteChat(
+                                        chatId,
+                                        title,
+                                        isGroup: isGroup,
+                                      ),
+                                    );
+                                  }),
+                              ],
+                            ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1059,14 +1065,17 @@ class _RequestsTabBody extends StatelessWidget {
     final hasAny = incomingRequests.isNotEmpty || outgoingRequests.isNotEmpty;
 
     if (!hasAny) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final emptyTextColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+
       return ListView(
-        children: const [
-          SizedBox(height: 160),
+        children: [
+          const SizedBox(height: 160),
           Center(
             child: Text(
               'Нет активных запросов',
               style: TextStyle(
-                color: Color(0xFF6F7479),
+                color: emptyTextColor,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1169,10 +1178,14 @@ class _RequestListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tileColor = isDark ? const Color(0xFF111B21) : Colors.white;
+    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+    final dividerColor = isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
 
     return Material(
-      color: theme.colorScheme.surface,
+      color: tileColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 9, 12, 0),
         child: Row(
@@ -1198,7 +1211,7 @@ class _RequestListTile extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: theme.dividerColor)),
+                  border: Border(bottom: BorderSide(color: dividerColor)),
                 ),
                 child: Row(
                   children: [
@@ -1211,7 +1224,7 @@ class _RequestListTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: theme.colorScheme.onSurface,
+                              color: titleColor,
                               fontSize: 16.2,
                               fontWeight: FontWeight.w900,
                             ),
@@ -1222,7 +1235,7 @@ class _RequestListTile extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
+                              color: subtitleColor,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -1280,10 +1293,15 @@ class _WhatsChatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tileColor = isDark ? const Color(0xFF111B21) : Colors.white;
+    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+    final dividerColor = isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
+    final mutedIconColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF8A8F94);
 
     return Material(
-      color: theme.colorScheme.surface,
+      color: tileColor,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
@@ -1315,7 +1333,7 @@ class _WhatsChatTile extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: theme.dividerColor)),
+                    border: Border(bottom: BorderSide(color: dividerColor)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1329,7 +1347,7 @@ class _WhatsChatTile extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: theme.colorScheme.onSurface,
+                                color: titleColor,
                                 fontSize: 16.2,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -1339,7 +1357,7 @@ class _WhatsChatTile extends StatelessWidget {
                               children: [
                                 Icon(
                                   isGroup ? Icons.groups_2_rounded : Icons.done_all_rounded,
-                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.46),
+                                  color: mutedIconColor,
                                   size: 17,
                                 ),
                                 const SizedBox(width: 4),
@@ -1349,7 +1367,7 @@ class _WhatsChatTile extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      color: theme.colorScheme.onSurface.withValues(alpha: 0.62),
+                                      color: subtitleColor,
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -1395,6 +1413,10 @@ class _WhatsEmptyChats extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+
     return SizedBox(
       height: 430,
       child: Center(
@@ -1413,7 +1435,7 @@ class _WhatsEmptyChats extends StatelessWidget {
               Text(
                 message,
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
+                  color: titleColor,
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
@@ -1423,7 +1445,7 @@ class _WhatsEmptyChats extends StatelessWidget {
                 'Откройте меню и добавьте контакт',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                  color: subtitleColor,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1472,13 +1494,16 @@ class _MobileSideMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final panelWidth = width < 430 ? width * 0.82 : 330.0;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final panelColor = isDark ? const Color(0xFF111B21) : const Color(0xFFF8F8F8);
+    final footerColor = isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.42);
 
     return Container(
       width: panelWidth,
       height: double.infinity,
-      decoration: const BoxDecoration(
-        color: Color(0xFFF8F8F8),
-        boxShadow: [
+      decoration: BoxDecoration(
+        color: panelColor,
+        boxShadow: const [
           BoxShadow(
             color: Color(0x33000000),
             blurRadius: 22,
@@ -1550,7 +1575,7 @@ class _MobileSideMenu extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.lock_outline_rounded,
-                    color: Colors.black.withValues(alpha: 0.42),
+                    color: footerColor,
                     size: 18,
                   ),
                   const SizedBox(width: 8),
@@ -1560,7 +1585,7 @@ class _MobileSideMenu extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.black.withValues(alpha: 0.42),
+                        color: footerColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1644,10 +1669,18 @@ class _MobileSideMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleColor = danger ? const Color(0xFFD32F2F) : const Color(0xFF111111);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = danger
+        ? const Color(0xFFD32F2F)
+        : isDark
+            ? const Color(0xFFE9EDEF)
+            : const Color(0xFF111111);
     final subtitleColor = danger
         ? const Color(0xFFD32F2F).withValues(alpha: 0.72)
-        : const Color(0xFF6F7479);
+        : isDark
+            ? const Color(0xFF8696A0)
+            : const Color(0xFF6F7479);
+    final arrowColor = isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.25);
 
     return Material(
       color: Colors.transparent,
@@ -1695,7 +1728,7 @@ class _MobileSideMenuItem extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: Colors.black.withValues(alpha: 0.25)),
+              Icon(Icons.chevron_right_rounded, color: arrowColor),
             ],
           ),
         ),
@@ -1709,10 +1742,12 @@ class _MobileSideDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       height: 1,
       margin: const EdgeInsets.symmetric(vertical: 8),
-      color: const Color(0xFFE4E4E4),
+      color: isDark ? const Color(0xFF222D34) : const Color(0xFFE4E4E4),
     );
   }
 }
