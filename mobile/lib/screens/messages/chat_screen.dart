@@ -7,6 +7,7 @@ import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
+import '../../core/attachment_download_store.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/top_notification.dart';
@@ -3117,6 +3118,7 @@ class _AlbumGrid extends StatelessWidget {
     final kind = attachment['kind']?.toString();
     final rawUrl = attachment['url']?.toString() ?? '';
     final url = ApiClient.absoluteUrl(rawUrl);
+    final cached = AttachmentDownloadStore.get(url);
 
     return GestureDetector(
       onTap: () => onOpen(index),
@@ -3129,7 +3131,9 @@ class _AlbumGrid extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (kind == 'image')
-                Image.network(url, fit: BoxFit.cover)
+                cached == null
+                    ? Image.network(url, fit: BoxFit.cover)
+                    : Image.memory(cached.bytes, fit: BoxFit.cover)
               else
                 Container(
                   color: accentColor.withValues(alpha: 0.22),
@@ -3149,6 +3153,15 @@ class _AlbumGrid extends StatelessWidget {
                     size: 48,
                   ),
                 ),
+              Positioned(
+                top: 6,
+                right: 6,
+                child: _AlbumDownloadBadge(
+                  attachment: attachment,
+                  fallbackUrl: url,
+                  accentColor: accentColor,
+                ),
+              ),
               if (overlayText != null)
                 Container(
                   color: Colors.black.withValues(alpha: 0.56),
@@ -3218,11 +3231,14 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
               final kind = attachment['kind']?.toString();
               final rawUrl = attachment['url']?.toString() ?? '';
               final url = ApiClient.absoluteUrl(rawUrl);
+              final cached = AttachmentDownloadStore.get(url);
 
               if (kind == 'image') {
                 return InteractiveViewer(
                   child: Center(
-                    child: Image.network(url, fit: BoxFit.contain),
+                    child: cached == null
+                        ? Image.network(url, fit: BoxFit.contain)
+                        : Image.memory(cached.bytes, fit: BoxFit.contain),
                   ),
                 );
               }
@@ -3283,10 +3299,223 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 48),
+                  _AlbumViewerDownloadButton(
+                    message: widget.messages[_index],
+                    accentColor: widget.accentColor,
+                    onDownloaded: () {
+                      if (!mounted) return;
+                      setState(() {});
+                    },
+                  ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AlbumDownloadBadge extends StatefulWidget {
+  final Map<String, dynamic> attachment;
+  final String fallbackUrl;
+  final Color accentColor;
+
+  const _AlbumDownloadBadge({
+    required this.attachment,
+    required this.fallbackUrl,
+    required this.accentColor,
+  });
+
+  @override
+  State<_AlbumDownloadBadge> createState() => _AlbumDownloadBadgeState();
+}
+
+class _AlbumDownloadBadgeState extends State<_AlbumDownloadBadge> {
+  bool _downloading = false;
+  double? _progress;
+
+  String get _url {
+    final raw = widget.attachment['url']?.toString() ?? widget.fallbackUrl;
+    return ApiClient.absoluteUrl(raw);
+  }
+
+  String get _name => widget.attachment['original_name']?.toString() ?? 'media';
+
+  String get _mimeType => widget.attachment['mime_type']?.toString() ?? 'application/octet-stream';
+
+  Future<void> _download() async {
+    if (_downloading) return;
+
+    if (AttachmentDownloadStore.isDownloaded(_url)) {
+      if (!mounted) return;
+      setState(() {});
+      return;
+    }
+
+    setState(() {
+      _downloading = true;
+      _progress = null;
+    });
+
+    try {
+      await AttachmentDownloadStore.download(
+        url: _url,
+        name: _name,
+        mimeType: _mimeType,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() => _progress = progress.value);
+        },
+      );
+
+      if (!mounted) return;
+      setState(() => _downloading = false);
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _downloading = false;
+        _progress = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось скачать медиа внутри UMe')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final downloaded = AttachmentDownloadStore.isDownloaded(_url);
+
+    return Tooltip(
+      message: downloaded ? 'Скачано в UMe' : 'Скачать внутри UMe',
+      child: InkResponse(
+        onTap: _download,
+        radius: 18,
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.52),
+            shape: BoxShape.circle,
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (_downloading)
+                CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  value: _progress,
+                  color: Colors.white,
+                ),
+              Icon(
+                downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
+                color: Colors.white,
+                size: 19,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AlbumViewerDownloadButton extends StatefulWidget {
+  final Map<String, dynamic> message;
+  final Color accentColor;
+  final VoidCallback onDownloaded;
+
+  const _AlbumViewerDownloadButton({
+    required this.message,
+    required this.accentColor,
+    required this.onDownloaded,
+  });
+
+  @override
+  State<_AlbumViewerDownloadButton> createState() => _AlbumViewerDownloadButtonState();
+}
+
+class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> {
+  bool _downloading = false;
+  double? _progress;
+
+  Map<String, dynamic> get _attachment => Map<String, dynamic>.from(widget.message['attachment'] as Map);
+
+  String get _url => ApiClient.absoluteUrl(_attachment['url']?.toString() ?? '');
+
+  String get _name => _attachment['original_name']?.toString() ?? 'media';
+
+  String get _mimeType => _attachment['mime_type']?.toString() ?? 'application/octet-stream';
+
+  Future<void> _download() async {
+    if (_downloading) return;
+
+    if (AttachmentDownloadStore.isDownloaded(_url)) {
+      widget.onDownloaded();
+      return;
+    }
+
+    setState(() {
+      _downloading = true;
+      _progress = null;
+    });
+
+    try {
+      await AttachmentDownloadStore.download(
+        url: _url,
+        name: _name,
+        mimeType: _mimeType,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() => _progress = progress.value);
+        },
+      );
+
+      if (!mounted) return;
+
+      setState(() => _downloading = false);
+      widget.onDownloaded();
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _downloading = false;
+        _progress = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось скачать медиа внутри UMe')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final downloaded = AttachmentDownloadStore.isDownloaded(_url);
+
+    return IconButton(
+      tooltip: downloaded ? 'Скачано в UMe' : 'Скачать внутри UMe',
+      onPressed: _download,
+      color: Colors.white,
+      icon: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (_downloading)
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.2,
+                value: _progress,
+                color: Colors.white,
+              ),
+            ),
+          Icon(
+            downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
           ),
         ],
       ),

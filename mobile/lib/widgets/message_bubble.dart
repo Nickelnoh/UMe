@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
+import '../core/attachment_download_store.dart';
 
 class VoicePlaybackQueue {
   static List<String> _urls = const [];
@@ -114,6 +115,7 @@ class MessageBubble extends StatelessWidget {
     final url = ApiClient.absoluteUrl(rawUrl);
     final kind = attachment?['kind']?.toString() ?? 'other';
     final name = attachment?['original_name']?.toString() ?? 'file';
+    final cached = AttachmentDownloadStore.get(url);
 
     if (kind == 'image') {
       await showDialog(
@@ -121,6 +123,7 @@ class MessageBubble extends StatelessWidget {
         builder: (_) => _ImageViewerDialog(
           url: url,
           title: name,
+          bytes: cached?.bytes,
         ),
       );
       return;
@@ -132,22 +135,24 @@ class MessageBubble extends StatelessWidget {
         builder: (_) => _VideoViewerDialog(
           url: url,
           title: name,
+          downloaded: cached,
         ),
       );
       return;
     }
 
-    final uri = Uri.parse(url);
+    if (cached != null) {
+      await showDialog(
+        context: context,
+        builder: (_) => _DownloadedFileDialog(entry: cached),
+      );
+      return;
+    }
 
-    final opened = await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
-
-    if (!opened && context.mounted) {
+    if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Не удалось открыть файл'),
+          content: Text('Сначала скачайте файл внутри UMe'),
         ),
       );
     }
@@ -382,7 +387,7 @@ class _ReactionBar extends StatelessWidget {
   }
 }
 
-class _AttachmentPreview extends StatelessWidget {
+class _AttachmentPreview extends StatefulWidget {
   final Map<String, dynamic> attachment;
   final Color textColor;
   final VoidCallback onOpen;
@@ -394,35 +399,60 @@ class _AttachmentPreview extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final kind = attachment['kind']?.toString() ?? 'other';
-    final url = ApiClient.absoluteUrl(attachment['url']?.toString());
-    final name = attachment['original_name']?.toString() ?? 'file';
+  State<_AttachmentPreview> createState() => _AttachmentPreviewState();
+}
 
-    if (kind == 'image') {
+class _AttachmentPreviewState extends State<_AttachmentPreview> {
+  String get _kind => widget.attachment['kind']?.toString() ?? 'other';
+  String get _url => ApiClient.absoluteUrl(widget.attachment['url']?.toString());
+  String get _name => widget.attachment['original_name']?.toString() ?? 'file';
+  String get _mimeType => widget.attachment['mime_type']?.toString() ?? 'application/octet-stream';
+
+  bool get _hasDownloadableUrl => _url.trim().isNotEmpty;
+
+  void _refresh() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = AttachmentDownloadStore.get(_url);
+
+    if (_kind == 'image') {
       return InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: onOpen,
+        onTap: widget.onOpen,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
           child: Stack(
             alignment: Alignment.bottomLeft,
             children: [
-              Image.network(
-                url,
-                width: 260,
-                height: 220,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) {
-                  return _FileCard(
-                    icon: Icons.broken_image,
-                    name: name,
-                    label: 'Не удалось загрузить изображение',
-                    textColor: textColor,
-                    onTap: onOpen,
-                  );
-                },
-              ),
+              if (cached != null)
+                Image.memory(
+                  cached.bytes,
+                  width: 260,
+                  height: 220,
+                  fit: BoxFit.cover,
+                )
+              else
+                Image.network(
+                  _url,
+                  width: 260,
+                  height: 220,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) {
+                    return _FileCard(
+                      icon: Icons.broken_image,
+                      name: _name,
+                      label: 'Не удалось загрузить изображение',
+                      textColor: widget.textColor,
+                      url: _url,
+                      mimeType: _mimeType,
+                      onOpen: widget.onOpen,
+                    );
+                  },
+                ),
               Container(
                 width: 260,
                 padding: const EdgeInsets.symmetric(
@@ -440,7 +470,7 @@ class _AttachmentPreview extends StatelessWidget {
                   ),
                 ),
                 child: Text(
-                  name,
+                  cached == null ? _name : 'Скачано в UMe · $_name',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -449,77 +479,104 @@ class _AttachmentPreview extends StatelessWidget {
                   ),
                 ),
               ),
+              if (_hasDownloadableUrl)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _AttachmentDownloadButton(
+                    url: _url,
+                    name: _name,
+                    mimeType: _mimeType,
+                    compact: true,
+                    textColor: Colors.white,
+                    backgroundColor: Colors.black.withValues(alpha: 0.55),
+                    onDownloaded: _refresh,
+                    onOpenDownloaded: widget.onOpen,
+                  ),
+                ),
             ],
           ),
         ),
       );
     }
 
-    if (kind == 'video') {
+    if (_kind == 'video') {
       return _FileCard(
         icon: Icons.play_circle_outline,
-        name: name,
-        label: 'Видео',
-        textColor: textColor,
-        onTap: onOpen,
+        name: _name,
+        label: cached == null ? 'Видео' : 'Видео · скачано в UMe',
+        textColor: widget.textColor,
+        url: _url,
+        mimeType: _mimeType,
+        onOpen: widget.onOpen,
       );
     }
 
-    if (kind == 'audio') {
+    if (_kind == 'audio') {
       return _AudioPlayerCard(
-        url: url,
-        name: name,
-        textColor: textColor,
+        url: _url,
+        name: _name,
+        textColor: widget.textColor,
         sizeBytes: int.tryParse(
-          attachment['size_bytes']?.toString() ??
-              attachment['file_size']?.toString() ??
-              attachment['size']?.toString() ??
+          widget.attachment['size_bytes']?.toString() ??
+              widget.attachment['file_size']?.toString() ??
+              widget.attachment['size']?.toString() ??
               '',
         ),
+        mimeType: _mimeType,
       );
     }
 
-    if (kind == 'document') {
+    if (_kind == 'document') {
       return _FileCard(
         icon: Icons.description_outlined,
-        name: name,
-        label: 'Документ',
-        textColor: textColor,
-        onTap: onOpen,
+        name: _name,
+        label: cached == null ? 'Документ' : 'Документ · скачано в UMe',
+        textColor: widget.textColor,
+        url: _url,
+        mimeType: _mimeType,
+        onOpen: widget.onOpen,
       );
     }
 
-    if (kind == 'file') {
+    if (_kind == 'file') {
       return _FileCard(
         icon: Icons.insert_drive_file_outlined,
-        name: name,
-        label: 'Файл',
-        textColor: textColor,
-        onTap: onOpen,
+        name: _name,
+        label: cached == null ? 'Файл' : 'Файл · скачано в UMe',
+        textColor: widget.textColor,
+        url: _url,
+        mimeType: _mimeType,
+        onOpen: widget.onOpen,
       );
     }
 
     return _FileCard(
       icon: Icons.attach_file,
-      name: name,
-      label: 'Файл',
-      textColor: textColor,
-      onTap: onOpen,
+      name: _name,
+      label: cached == null ? 'Файл' : 'Файл · скачано в UMe',
+      textColor: widget.textColor,
+      url: _url,
+      mimeType: _mimeType,
+      onOpen: widget.onOpen,
     );
   }
 }
+
 
 class _AudioPlayerCard extends StatefulWidget {
   final String url;
   final String name;
   final Color textColor;
   final int? sizeBytes;
+  final String mimeType;
 
   const _AudioPlayerCard({
     required this.url,
     required this.name,
     required this.textColor,
     required this.sizeBytes,
+    required this.mimeType,
   });
 
   @override
@@ -596,7 +653,12 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
     if (_sourceReady) return;
 
     try {
-      await _player.setSource(UrlSource(widget.url));
+      final cached = AttachmentDownloadStore.get(widget.url);
+      if (cached != null) {
+        await _player.setSource(BytesSource(cached.bytes));
+      } else {
+        await _player.setSource(UrlSource(widget.url));
+      }
       final duration = await _player.getDuration();
 
       if (!mounted) return;
@@ -627,7 +689,12 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
     try {
       await _player.resume();
     } catch (_) {
-      await _player.play(UrlSource(widget.url));
+      final cached = AttachmentDownloadStore.get(widget.url);
+      if (cached != null) {
+        await _player.play(BytesSource(cached.bytes));
+      } else {
+        await _player.play(UrlSource(widget.url));
+      }
     }
 
     final duration = await _player.getDuration();
@@ -699,6 +766,22 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
               _isPlaying ? Icons.pause : Icons.play_arrow,
             ),
           ),
+          const SizedBox(width: 6),
+          _AttachmentDownloadButton(
+            url: widget.url,
+            name: widget.name,
+            mimeType: widget.mimeType,
+            compact: true,
+            textColor: widget.textColor,
+            onDownloaded: () {
+              if (!mounted) return;
+              setState(() {
+                _sourceReady = false;
+              });
+              unawaited(_prepareSource());
+            },
+            onOpenDownloaded: () {},
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -736,47 +819,63 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
   }
 }
 
-class _FileCard extends StatelessWidget {
+class _FileCard extends StatefulWidget {
   final IconData icon;
   final String name;
   final String? label;
   final Color textColor;
-  final VoidCallback onTap;
+  final String url;
+  final String mimeType;
+  final VoidCallback onOpen;
 
   const _FileCard({
     required this.icon,
     required this.name,
     this.label,
     required this.textColor,
-    required this.onTap,
+    required this.url,
+    required this.mimeType,
+    required this.onOpen,
   });
 
   @override
+  State<_FileCard> createState() => _FileCardState();
+}
+
+class _FileCardState extends State<_FileCard> {
+  void _refresh() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final cached = AttachmentDownloadStore.get(widget.url);
+
     return InkWell(
       borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
+      onTap: cached == null ? null : widget.onOpen,
       child: Container(
         constraints: const BoxConstraints(
           minWidth: 220,
-          maxWidth: 280,
+          maxWidth: 300,
         ),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: textColor.withValues(alpha: 0.08),
+          color: widget.textColor.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: textColor.withValues(alpha: 0.12),
+            color: widget.textColor.withValues(alpha: 0.12),
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircleAvatar(
-              backgroundColor: textColor.withValues(alpha: 0.12),
+              backgroundColor: widget.textColor.withValues(alpha: 0.12),
               child: Icon(
-                icon,
-                color: textColor,
+                cached == null ? widget.icon : Icons.download_done_rounded,
+                color: widget.textColor,
               ),
             ),
             const SizedBox(width: 10),
@@ -784,31 +883,42 @@ class _FileCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (label != null)
+                  if (widget.label != null)
                     Text(
-                      label!,
+                      widget.label!,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: textColor.withValues(alpha: 0.75),
+                            color: widget.textColor.withValues(alpha: 0.75),
                           ),
                     ),
                   Text(
-                    name,
+                    widget.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: textColor,
+                      color: widget.textColor,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Нажмите, чтобы открыть',
+                    cached == null
+                        ? 'Скачать внутри UMe'
+                        : 'Скачано: ${AttachmentDownloadStore.formatSize(cached.sizeBytes)}',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: textColor.withValues(alpha: 0.65),
+                          color: widget.textColor.withValues(alpha: 0.65),
                         ),
                   ),
                 ],
               ),
+            ),
+            const SizedBox(width: 8),
+            _AttachmentDownloadButton(
+              url: widget.url,
+              name: widget.name,
+              mimeType: widget.mimeType,
+              textColor: widget.textColor,
+              onDownloaded: _refresh,
+              onOpenDownloaded: widget.onOpen,
             ),
           ],
         ),
@@ -817,13 +927,204 @@ class _FileCard extends StatelessWidget {
   }
 }
 
+class _AttachmentDownloadButton extends StatefulWidget {
+  final String url;
+  final String name;
+  final String mimeType;
+  final Color textColor;
+  final Color? backgroundColor;
+  final bool compact;
+  final VoidCallback onDownloaded;
+  final VoidCallback onOpenDownloaded;
+
+  const _AttachmentDownloadButton({
+    required this.url,
+    required this.name,
+    required this.mimeType,
+    required this.textColor,
+    this.backgroundColor,
+    this.compact = false,
+    required this.onDownloaded,
+    required this.onOpenDownloaded,
+  });
+
+  @override
+  State<_AttachmentDownloadButton> createState() => _AttachmentDownloadButtonState();
+}
+
+class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
+  bool _downloading = false;
+  double? _progress;
+  String? _label;
+
+  bool get _downloaded => AttachmentDownloadStore.isDownloaded(widget.url);
+
+  Future<void> _download() async {
+    if (_downloading) return;
+
+    if (_downloaded) {
+      widget.onOpenDownloaded();
+      return;
+    }
+
+    setState(() {
+      _downloading = true;
+      _progress = null;
+      _label = '0%';
+    });
+
+    try {
+      final entry = await AttachmentDownloadStore.download(
+        url: widget.url,
+        name: widget.name,
+        mimeType: widget.mimeType,
+        onProgress: (progress) {
+          if (!mounted) return;
+
+          final value = progress.value;
+
+          setState(() {
+            _progress = value;
+            _label = value == null
+                ? AttachmentDownloadStore.formatSize(progress.downloadedBytes)
+                : '${(value * 100).clamp(0, 100).round()}%';
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _downloading = false;
+        _progress = 1;
+        _label = AttachmentDownloadStore.formatSize(entry.sizeBytes);
+      });
+
+      widget.onDownloaded();
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _downloading = false;
+        _progress = null;
+        _label = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось скачать файл внутри UMe'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.compact ? 38.0 : 42.0;
+    final iconSize = widget.compact ? 19.0 : 21.0;
+    final background = widget.backgroundColor ?? widget.textColor.withValues(alpha: 0.10);
+
+    return Tooltip(
+      message: _downloaded ? 'Открыть скачанное' : 'Скачать внутри UMe',
+      child: InkResponse(
+        radius: size / 2,
+        onTap: _download,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: background,
+                  shape: BoxShape.circle,
+                ),
+                child: SizedBox(width: size, height: size),
+              ),
+              if (_downloading)
+                SizedBox(
+                  width: size - 8,
+                  height: size - 8,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    value: _progress,
+                    color: widget.textColor,
+                  ),
+                ),
+              Icon(
+                _downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
+                color: widget.textColor,
+                size: iconSize,
+              ),
+              if (_downloading && !widget.compact && _label != null)
+                Positioned(
+                  bottom: 0,
+                  child: Text(
+                    _label!,
+                    style: TextStyle(
+                      color: widget.textColor,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DownloadedFileDialog extends StatelessWidget {
+  final DownloadedAttachment entry;
+
+  const _DownloadedFileDialog({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Файл скачан внутри UMe'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            entry.name,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text('Размер: ${AttachmentDownloadStore.formatSize(entry.sizeBytes)}'),
+          Text('Тип: ${entry.mimeType}'),
+          const SizedBox(height: 12),
+          const Text(
+            'Файл сохранён во внутреннем кеше мессенджера и открывается из UMe без повторной загрузки.',
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Готово'),
+        ),
+      ],
+    );
+  }
+}
+
+
 class _ImageViewerDialog extends StatelessWidget {
   final String url;
   final String title;
+  final Uint8List? bytes;
 
   const _ImageViewerDialog({
     required this.url,
     required this.title,
+    this.bytes,
   });
 
   @override
@@ -836,10 +1137,15 @@ class _ImageViewerDialog extends StatelessWidget {
             child: InteractiveViewer(
               minScale: 0.8,
               maxScale: 4,
-              child: Image.network(
-                url,
-                fit: BoxFit.contain,
-              ),
+              child: bytes == null
+                  ? Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                    )
+                  : Image.memory(
+                      bytes!,
+                      fit: BoxFit.contain,
+                    ),
             ),
           ),
           Positioned(
@@ -875,10 +1181,12 @@ class _ImageViewerDialog extends StatelessWidget {
 class _VideoViewerDialog extends StatefulWidget {
   final String url;
   final String title;
+  final DownloadedAttachment? downloaded;
 
   const _VideoViewerDialog({
     required this.url,
     required this.title,
+    this.downloaded,
   });
 
   @override
@@ -975,11 +1283,27 @@ class _VideoViewerDialogState extends State<_VideoViewerDialog> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        widget.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          if (widget.downloaded != null)
+                            Text(
+                              'Скачано в UMe · ${AttachmentDownloadStore.formatSize(widget.downloaded!.sizeBytes)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.72),
+                                fontSize: 12,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
