@@ -180,6 +180,18 @@ class MessageEditIn(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
 
 
+class MessageIdsIn(BaseModel):
+    message_ids: list[str] = Field(default_factory=list)
+
+
+class ForwardMessageIn(BaseModel):
+    target_chat_id: str
+
+
+class PinnedMessageIn(BaseModel):
+    message_id: Optional[str] = None
+
+
 class ReactionIn(BaseModel):
     reaction_type: str = Field(pattern="^(emoji|image)$")
     emoji: Optional[str] = Field(default=None, max_length=32)
@@ -401,6 +413,158 @@ async def fetch_reactions_for_messages(
     return reactions_by_message
 
 
+def format_message_row(
+    row,
+    reactions_by_message: Optional[dict] = None,
+    current_user_id: Optional[str] = None,
+) -> dict:
+    data = dict(row)
+    message_id = data["id"]
+    sender_user_id = data["sender_user_id"]
+    forwarded_name = (
+        data.get("forwarded_from_display_name")
+        or data.get("forwarded_from_nickname")
+        or data.get("forwarded_from_username")
+    )
+
+    return {
+        "id": message_id,
+        "chat_id": data["chat_id"],
+        "sender_user_id": sender_user_id,
+        "sender_username": data.get("username"),
+        "sender_name": data.get("display_name") or data.get("nickname") or data.get("username"),
+        "text": data.get("text"),
+        "message_type": data.get("message_type"),
+        "attachment": format_attachment(row),
+        "reactions": (reactions_by_message or {}).get(message_id, []),
+        "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+        "edited_at": data["edited_at"].isoformat() if data.get("edited_at") else None,
+        "is_mine": sender_user_id == current_user_id,
+        "delivery_status": data.get("delivery_status"),
+        "forwarded_from_message_id": data.get("forwarded_from_message_id"),
+        "forwarded_from_user_id": data.get("forwarded_from_user_id"),
+        "forwarded_from_name": forwarded_name,
+        "pinned": bool(data.get("pinned")),
+    }
+
+
+async def fetch_message_payloads(
+    conn: asyncpg.Connection,
+    message_ids: list[str],
+    current_user_id: str,
+) -> list[dict]:
+    if not message_ids:
+        return []
+
+    rows = await conn.fetch(
+        """
+        SELECT
+            m.id,
+            m.chat_id,
+            m.sender_user_id,
+            m.text,
+            m.message_type,
+            m.created_at,
+            m.edited_at,
+            m.forwarded_from_message_id,
+            m.forwarded_from_user_id,
+
+            u.username,
+            u.nickname,
+            u.display_name,
+
+            fu.username AS forwarded_from_username,
+            fu.nickname AS forwarded_from_nickname,
+            fu.display_name AS forwarded_from_display_name,
+
+            a.id AS attachment_id,
+            a.storage_key AS attachment_storage_key,
+            a.original_name AS attachment_original_name,
+            a.mime_type AS attachment_mime_type,
+            a.size_bytes AS attachment_size_bytes,
+            a.kind AS attachment_kind,
+
+            (m.id = c.pinned_message_id) AS pinned,
+
+            CASE
+                WHEN m.sender_user_id = $2 AND EXISTS (
+                    SELECT 1
+                    FROM public.message_receipts mr
+                    WHERE mr.message_id = m.id
+                      AND mr.user_id <> $2
+                      AND mr.read_at IS NOT NULL
+                ) THEN 'read'
+                WHEN m.sender_user_id = $2 AND EXISTS (
+                    SELECT 1
+                    FROM public.message_receipts mr
+                    WHERE mr.message_id = m.id
+                      AND mr.user_id <> $2
+                      AND mr.delivered_at IS NOT NULL
+                ) THEN 'delivered'
+                WHEN m.sender_user_id = $2 THEN 'sent'
+                ELSE NULL
+            END AS delivery_status
+        FROM public.messages m
+        JOIN public.chats c
+          ON c.id = m.chat_id
+        JOIN public.users u
+          ON u.id = m.sender_user_id
+        LEFT JOIN public.users fu
+          ON fu.id = m.forwarded_from_user_id
+        LEFT JOIN public.attachments a
+          ON a.message_id = m.id
+        WHERE m.id = ANY($1::text[])
+          AND m.deleted_at IS NULL
+        ORDER BY m.created_at ASC
+        """,
+        message_ids,
+        current_user_id,
+    )
+
+    reactions_by_message = await fetch_reactions_for_messages(
+        conn,
+        [row["id"] for row in rows],
+        current_user_id,
+    )
+
+    return [
+        format_message_row(row, reactions_by_message, current_user_id)
+        for row in rows
+    ]
+
+
+async def fetch_message_payload(
+    conn: asyncpg.Connection,
+    message_id: str,
+    current_user_id: str,
+) -> Optional[dict]:
+    payloads = await fetch_message_payloads(conn, [message_id], current_user_id)
+    return payloads[0] if payloads else None
+
+
+async def broadcast_receipt_updates(rows, status: str):
+    grouped: Dict[tuple[str, str], list[str]] = {}
+
+    for row in rows:
+        sender_user_id = row["sender_user_id"]
+        chat_id = row["chat_id"]
+        message_id = row["id"]
+
+        grouped.setdefault((sender_user_id, chat_id), []).append(message_id)
+
+    for (sender_user_id, chat_id), message_ids in grouped.items():
+        await manager.send_to_user(
+            sender_user_id,
+            {
+                "type": "message.receipts_updated",
+                "chat_id": chat_id,
+                "message_ids": message_ids,
+                "status": status,
+                "updated_at": now().isoformat(),
+            },
+        )
+
+
 async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> str:
@@ -526,6 +690,46 @@ async def startup():
             """
             ALTER TABLE public.attachments
             ADD COLUMN IF NOT EXISTS file_bytes BYTEA
+            """
+        )
+
+        await conn.execute(
+            """
+            ALTER TABLE public.chats
+            ADD COLUMN IF NOT EXISTS pinned_message_id TEXT
+            """
+        )
+
+        await conn.execute(
+            """
+            ALTER TABLE public.messages
+            ADD COLUMN IF NOT EXISTS forwarded_from_message_id TEXT
+            """
+        )
+
+        await conn.execute(
+            """
+            ALTER TABLE public.messages
+            ADD COLUMN IF NOT EXISTS forwarded_from_user_id TEXT
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public.message_receipts (
+                message_id TEXT NOT NULL REFERENCES public.messages(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+                delivered_at TIMESTAMPTZ,
+                read_at TIMESTAMPTZ,
+                PRIMARY KEY (message_id, user_id)
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_message_receipts_message_id
+            ON public.message_receipts(message_id)
             """
         )
 
@@ -2667,20 +2871,51 @@ async def list_messages(
                 m.message_type,
                 m.created_at,
                 m.edited_at,
+                m.forwarded_from_message_id,
+                m.forwarded_from_user_id,
 
                 u.username,
                 u.nickname,
                 u.display_name,
+
+                fu.username AS forwarded_from_username,
+                fu.nickname AS forwarded_from_nickname,
+                fu.display_name AS forwarded_from_display_name,
 
                 a.id AS attachment_id,
                 a.storage_key AS attachment_storage_key,
                 a.original_name AS attachment_original_name,
                 a.mime_type AS attachment_mime_type,
                 a.size_bytes AS attachment_size_bytes,
-                a.kind AS attachment_kind
+                a.kind AS attachment_kind,
+
+                (m.id = c.pinned_message_id) AS pinned,
+
+                CASE
+                    WHEN m.sender_user_id = $2 AND EXISTS (
+                        SELECT 1
+                        FROM public.message_receipts mr
+                        WHERE mr.message_id = m.id
+                          AND mr.user_id <> $2
+                          AND mr.read_at IS NOT NULL
+                    ) THEN 'read'
+                    WHEN m.sender_user_id = $2 AND EXISTS (
+                        SELECT 1
+                        FROM public.message_receipts mr
+                        WHERE mr.message_id = m.id
+                          AND mr.user_id <> $2
+                          AND mr.delivered_at IS NOT NULL
+                    ) THEN 'delivered'
+                    WHEN m.sender_user_id = $2 THEN 'sent'
+                    ELSE NULL
+                END AS delivery_status
             FROM public.messages m
+            JOIN public.chats c
+              ON c.id = m.chat_id
             JOIN public.users u
               ON u.id = m.sender_user_id
+            LEFT JOIN public.users fu
+              ON fu.id = m.forwarded_from_user_id
             LEFT JOIN public.attachments a
               ON a.message_id = m.id
             WHERE m.chat_id = $1
@@ -2689,38 +2924,20 @@ async def list_messages(
             LIMIT 300
             """,
             chat_id,
+            user_id,
         )
 
-    message_ids = [row["id"] for row in rows]
-
-    async with db_pool.acquire() as conn:
+        message_ids = [row["id"] for row in rows]
         reactions_by_message = await fetch_reactions_for_messages(
             conn,
             message_ids,
             user_id,
         )
 
-    result = []
-
-    for row in rows:
-        result.append(
-            {
-                "id": row["id"],
-                "chat_id": row["chat_id"],
-                "sender_user_id": row["sender_user_id"],
-                "sender_username": row["username"],
-                "sender_name": row["display_name"] or row["nickname"] or row["username"],
-                "text": row["text"],
-                "message_type": row["message_type"],
-                "attachment": format_attachment(row),
-                "reactions": reactions_by_message.get(row["id"], []),
-                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "edited_at": row["edited_at"].isoformat() if row["edited_at"] else None,
-                "is_mine": row["sender_user_id"] == user_id,
-            }
-        )
-
-    return result
+    return [
+        format_message_row(row, reactions_by_message, user_id)
+        for row in rows
+    ]
 
 
 def _send_onesignal_request_sync(payload: dict) -> dict:
@@ -2975,6 +3192,11 @@ async def send_message(
         "reactions": [],
         "created_at": current_time.isoformat(),
         "edited_at": None,
+        "delivery_status": "sent",
+        "forwarded_from_message_id": None,
+        "forwarded_from_user_id": None,
+        "forwarded_from_name": None,
+        "pinned": False,
     }
 
     await manager.broadcast_to_chat(
@@ -3163,6 +3385,412 @@ async def delete_message(
     )
 
     return {"ok": True}
+
+
+@app.post("/messages/delivered")
+async def mark_messages_delivered(
+    data: MessageIdsIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    message_ids = [item.strip() for item in data.message_ids if item.strip()]
+
+    if not message_ids:
+        return {"ok": True, "message_ids": []}
+
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT m.id, m.chat_id, m.sender_user_id
+            FROM public.messages m
+            JOIN public.chat_members cm
+              ON cm.chat_id = m.chat_id
+             AND cm.user_id = $2
+             AND cm.hidden = false
+             AND cm.left_at IS NULL
+            WHERE m.id = ANY($1::text[])
+              AND m.sender_user_id <> $2
+              AND m.deleted_at IS NULL
+            """,
+            message_ids,
+            user_id,
+        )
+
+        if not rows:
+            return {"ok": True, "message_ids": []}
+
+        await conn.executemany(
+            """
+            INSERT INTO public.message_receipts (
+                message_id,
+                user_id,
+                delivered_at,
+                read_at
+            )
+            VALUES ($1, $2, $3, NULL)
+            ON CONFLICT (message_id, user_id)
+            DO UPDATE SET
+                delivered_at = COALESCE(public.message_receipts.delivered_at, EXCLUDED.delivered_at)
+            """,
+            [(row["id"], user_id, current_time) for row in rows],
+        )
+
+    await broadcast_receipt_updates(rows, "delivered")
+
+    return {
+        "ok": True,
+        "message_ids": [row["id"] for row in rows],
+    }
+
+
+@app.post("/chats/{chat_id}/messages/read")
+async def mark_chat_messages_read(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        await assert_chat_member(conn, chat_id, user_id)
+
+        rows = await conn.fetch(
+            """
+            SELECT id, chat_id, sender_user_id
+            FROM public.messages
+            WHERE chat_id = $1
+              AND sender_user_id <> $2
+              AND deleted_at IS NULL
+            """,
+            chat_id,
+            user_id,
+        )
+
+        if not rows:
+            return {"ok": True, "message_ids": []}
+
+        await conn.executemany(
+            """
+            INSERT INTO public.message_receipts (
+                message_id,
+                user_id,
+                delivered_at,
+                read_at
+            )
+            VALUES ($1, $2, $3, $3)
+            ON CONFLICT (message_id, user_id)
+            DO UPDATE SET
+                delivered_at = COALESCE(public.message_receipts.delivered_at, EXCLUDED.delivered_at),
+                read_at = COALESCE(public.message_receipts.read_at, EXCLUDED.read_at)
+            """,
+            [(row["id"], user_id, current_time) for row in rows],
+        )
+
+    await broadcast_receipt_updates(rows, "read")
+
+    return {
+        "ok": True,
+        "message_ids": [row["id"] for row in rows],
+    }
+
+
+@app.get("/chats/{chat_id}/pinned-message")
+async def get_pinned_message(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    async with db_pool.acquire() as conn:
+        await assert_chat_member(conn, chat_id, user_id)
+
+        pinned_message_id = await conn.fetchval(
+            """
+            SELECT pinned_message_id
+            FROM public.chats
+            WHERE id = $1
+            """,
+            chat_id,
+        )
+
+        if not pinned_message_id:
+            return {"message": None}
+
+        payload = await fetch_message_payload(conn, pinned_message_id, user_id)
+
+    return {"message": payload}
+
+
+@app.post("/chats/{chat_id}/pinned-message")
+async def set_pinned_message(
+    chat_id: str,
+    data: PinnedMessageIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    message_id = clean_text(data.message_id)
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await assert_chat_member(conn, chat_id, user_id)
+
+            if message_id:
+                message_exists = await conn.fetchval(
+                    """
+                    SELECT 1
+                    FROM public.messages
+                    WHERE id = $1
+                      AND chat_id = $2
+                      AND deleted_at IS NULL
+                    """,
+                    message_id,
+                    chat_id,
+                )
+
+                if not message_exists:
+                    raise HTTPException(status_code=404, detail="Message not found")
+
+            await conn.execute(
+                """
+                UPDATE public.chats
+                SET pinned_message_id = $2,
+                    updated_at = $3
+                WHERE id = $1
+                """,
+                chat_id,
+                message_id,
+                now(),
+            )
+
+            payload = None
+
+            if message_id:
+                payload = await fetch_message_payload(conn, message_id, user_id)
+
+    await manager.broadcast_to_chat(
+        chat_id,
+        {
+            "type": "chat.pinned_message.updated",
+            "chat_id": chat_id,
+            "message": payload,
+        },
+    )
+
+    return {"message": payload}
+
+
+@app.post("/messages/delete-batch")
+async def delete_messages_batch(
+    data: MessageIdsIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    message_ids = [item.strip() for item in data.message_ids if item.strip()]
+
+    if not message_ids:
+        return {"ok": True, "message_ids": []}
+
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, chat_id
+            FROM public.messages
+            WHERE id = ANY($1::text[])
+              AND sender_user_id = $2
+              AND deleted_at IS NULL
+            """,
+            message_ids,
+            user_id,
+        )
+
+        if not rows:
+            return {"ok": True, "message_ids": []}
+
+        await conn.execute(
+            """
+            UPDATE public.messages
+            SET deleted_at = $3
+            WHERE id = ANY($1::text[])
+              AND sender_user_id = $2
+              AND deleted_at IS NULL
+            """,
+            [row["id"] for row in rows],
+            user_id,
+            current_time,
+        )
+
+    by_chat: Dict[str, list[str]] = {}
+
+    for row in rows:
+        by_chat.setdefault(row["chat_id"], []).append(row["id"])
+
+    for chat_id, ids in by_chat.items():
+        await manager.broadcast_to_chat(
+            chat_id,
+            {
+                "type": "messages.deleted",
+                "chat_id": chat_id,
+                "message_ids": ids,
+            },
+        )
+
+    return {
+        "ok": True,
+        "message_ids": [row["id"] for row in rows],
+    }
+
+
+@app.post("/messages/{message_id}/forward")
+async def forward_message(
+    message_id: str,
+    data: ForwardMessageIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    target_chat_id = clean_text(data.target_chat_id)
+
+    if not target_chat_id:
+        raise HTTPException(status_code=400, detail="Target chat required")
+
+    new_message_id = make_id()
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            original = await conn.fetchrow(
+                """
+                SELECT
+                    m.id,
+                    m.chat_id,
+                    m.sender_user_id,
+                    m.text,
+                    m.message_type,
+                    m.deleted_at,
+
+                    a.id AS attachment_id,
+                    a.storage_key AS attachment_storage_key,
+                    a.original_name AS attachment_original_name,
+                    a.mime_type AS attachment_mime_type,
+                    a.size_bytes AS attachment_size_bytes,
+                    a.kind AS attachment_kind,
+                    a.file_bytes AS attachment_file_bytes
+                FROM public.messages m
+                LEFT JOIN public.attachments a
+                  ON a.message_id = m.id
+                WHERE m.id = $1
+                """,
+                message_id,
+            )
+
+            if not original or original["deleted_at"] is not None:
+                raise HTTPException(status_code=404, detail="Message not found")
+
+            await assert_chat_member(conn, original["chat_id"], user_id)
+            await assert_chat_member(conn, target_chat_id, user_id)
+
+            await conn.execute(
+                """
+                INSERT INTO public.messages (
+                    id,
+                    chat_id,
+                    sender_user_id,
+                    text,
+                    message_type,
+                    created_at,
+                    edited_at,
+                    deleted_at,
+                    forwarded_from_message_id,
+                    forwarded_from_user_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, $7, $8)
+                """,
+                new_message_id,
+                target_chat_id,
+                user_id,
+                original["text"],
+                original["message_type"],
+                current_time,
+                original["id"],
+                original["sender_user_id"],
+            )
+
+            if original["attachment_id"]:
+                original_name = original["attachment_original_name"] or "file"
+                mime_type = original["attachment_mime_type"] or "application/octet-stream"
+                kind = original["attachment_kind"] or detect_attachment_kind(mime_type)
+                content = original["attachment_file_bytes"]
+
+                if content is None and original["attachment_storage_key"]:
+                    base_dir = UPLOAD_DIR.resolve()
+                    source_path = (UPLOAD_DIR / original["attachment_storage_key"]).resolve()
+
+                    if str(source_path).startswith(str(base_dir)) and source_path.exists() and source_path.is_file():
+                        content = source_path.read_bytes()
+
+                if content is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Original attachment is not available",
+                    )
+
+                new_attachment_id = make_id()
+                new_storage_key = f"{user_id}/{new_attachment_id}_{safe_filename(original_name)}"
+                new_file_path = UPLOAD_DIR / new_storage_key
+                new_file_path.parent.mkdir(parents=True, exist_ok=True)
+                new_file_path.write_bytes(bytes(content))
+
+                await conn.execute(
+                    """
+                    INSERT INTO public.attachments (
+                        id,
+                        owner_user_id,
+                        message_id,
+                        purpose,
+                        storage_key,
+                        original_name,
+                        mime_type,
+                        size_bytes,
+                        kind,
+                        file_bytes,
+                        created_at
+                    )
+                    VALUES ($1, $2, $3, 'message', $4, $5, $6, $7, $8, $9, $10)
+                    """,
+                    new_attachment_id,
+                    user_id,
+                    new_message_id,
+                    new_storage_key,
+                    original_name,
+                    mime_type,
+                    len(content),
+                    kind,
+                    content,
+                    current_time,
+                )
+
+            await conn.execute(
+                """
+                UPDATE public.chats
+                SET updated_at = $1
+                WHERE id = $2
+                """,
+                current_time,
+                target_chat_id,
+            )
+
+            payload = await fetch_message_payload(conn, new_message_id, user_id)
+
+    if payload is None:
+        raise HTTPException(status_code=500, detail="Forwarded message was not created")
+
+    await manager.broadcast_to_chat(
+        target_chat_id,
+        {
+            "type": "message.created",
+            "chat_id": target_chat_id,
+            "message": payload,
+        },
+        exclude_user_id=user_id,
+    )
+
+    return payload
 
 
 @app.post("/messages/{message_id}/reaction")
