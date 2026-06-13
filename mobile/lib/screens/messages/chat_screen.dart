@@ -3010,9 +3010,9 @@ class _HoldToRecordButton extends StatelessWidget {
     final color = recording ? (locked ? accent : Colors.redAccent) : accent;
     final scale = recording ? 1.08 : 1.0;
 
-   return SizedBox(
+    return SizedBox(
       width: 58,
-      height: recording && !locked ? 96 : 50,
+      height: 96,
       child: Stack(
         clipBehavior: Clip.none,
         alignment: Alignment.bottomCenter,
