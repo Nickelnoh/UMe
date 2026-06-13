@@ -168,7 +168,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _peerLastSeenAt = result['last_seen_at']?.toString();
       });
     } catch (_) {
-      // РЎС‚Р°С‚СѓСЃ РЅРµ РґРѕР»Р¶РµРЅ Р»РѕРјР°С‚СЊ РѕС‚РєСЂС‹С‚РёРµ С‡Р°С‚Р°.
+      // Статус не должен ломать открытие чата.
     }
   }
 
@@ -185,7 +185,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _syncPinnedFlag();
       });
     } catch (_) {
-      // Р—Р°РєСЂРµРї РЅРµ РґРѕР»Р¶РµРЅ Р»РѕРјР°С‚СЊ РѕС‚РєСЂС‹С‚РёРµ С‡Р°С‚Р°.
+      // Закреп не должен ломать открытие чата.
     }
   }
 
@@ -207,7 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await ApiClient.post('/messages/delivered', {'message_ids': ids});
     } catch (_) {
-      // РЎС‚Р°С‚СѓСЃС‹ РґРѕСЃС‚Р°РІРєРё РЅРµ РґРѕР»Р¶РЅС‹ Р»РѕРјР°С‚СЊ С‡Р°С‚.
+      // Статусы доставки не должны ломать чат.
     }
   }
 
@@ -215,7 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await ApiClient.post('/chats/${widget.chatId}/messages/read', {});
     } catch (_) {
-      // РЎС‚Р°С‚СѓСЃС‹ РїСЂРѕС‡С‚РµРЅРёСЏ РЅРµ РґРѕР»Р¶РЅС‹ Р»РѕРјР°С‚СЊ С‡Р°С‚.
+      // Статусы прочтения не должны ломать чат.
     }
   }
 
@@ -286,17 +286,17 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёР№: ${ids.length}?'),
+          title: Text('Удалить сообщений: ${ids.length}?'),
           content: const Text(
-              'РЈРґР°Р»СЏС‚СЃСЏ С‚РѕР»СЊРєРѕ РІР°С€Рё СЃРѕРѕР±С‰РµРЅРёСЏ. Р§СѓР¶РёРµ СЃРѕРѕР±С‰РµРЅРёСЏ СЃРµСЂРІРµСЂ РЅРµ СѓРґР°Р»РёС‚.'),
+              'Удалятся только ваши сообщения. Чужие сообщения сервер не удалит.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('РћС‚РјРµРЅР°'),
+              child: const Text('Отмена'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('РЈРґР°Р»РёС‚СЊ'),
+              child: const Text('Удалить'),
             ),
           ],
         );
@@ -324,7 +324,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       TopNotification.success(context,
-          message: 'РЈРґР°Р»РµРЅРѕ: ${deletedIds.length}');
+          message: 'Удалено: ${deletedIds.length}');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -445,17 +445,17 @@ class _ChatScreenState extends State<ChatScreen> {
   String _activityText(String activityType) {
     switch (activityType) {
       case 'typing':
-        return 'РїРµС‡Р°С‚Р°РµС‚';
+        return 'печатает';
       case 'recording_voice':
-        return 'Р·Р°РїРёСЃС‹РІР°РµС‚ РіРѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ';
+        return 'записывает голосовое сообщение';
       case 'sending_audio':
-        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ Р°СѓРґРёРѕ';
+        return 'отправляет аудио';
       case 'sending_video':
-        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ РІРёРґРµРѕ';
+        return 'отправляет видео';
       case 'sending_photo':
-        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ С„РѕС‚Рѕ';
+        return 'отправляет фото';
       case 'sending_file':
-        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ С„Р°Р№Р»';
+        return 'отправляет файл';
       default:
         return '';
     }
@@ -477,21 +477,21 @@ class _ChatScreenState extends State<ChatScreen> {
       return text;
     }
 
-    if (widget.isGroup) return 'РіСЂСѓРїРїР°';
+    if (widget.isGroup) return 'группа';
 
-    if (_peerOnline) return 'РІ СЃРµС‚Рё';
+    if (_peerOnline) return 'в сети';
 
     final lastSeen = _peerLastSeenAt;
     if (lastSeen != null && lastSeen.isNotEmpty) {
-      return 'Р±С‹Р»(Р°) РІ ${_formatLastSeenTime(lastSeen)}';
+      return 'был(а) в ${_formatLastSeenTime(lastSeen)}';
     }
 
-    return 'Р±С‹Р»(Р°) РЅРµРґР°РІРЅРѕ';
+    return 'был(а) недавно';
   }
 
   String _formatLastSeenTime(String value) {
     final parsed = DateTime.tryParse(value);
-    if (parsed == null) return 'РЅРµРґР°РІРЅРѕ';
+    if (parsed == null) return 'недавно';
 
     final local = parsed.toLocal();
     final now = DateTime.now();
@@ -502,7 +502,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final days = today.difference(date).inDays;
 
     if (days == 0) return time;
-    if (days == 1) return 'РІС‡РµСЂР° $time';
+    if (days == 1) return 'вчера $time';
 
     return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')} $time';
   }
@@ -634,10 +634,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
             TopNotification.message(
               context,
-              title: 'РќРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ',
+              title: 'Новое сообщение',
               message: messageText != null && messageText.isNotEmpty
                   ? messageText
-                  : 'РќРѕРІРѕРµ РІР»РѕР¶РµРЅРёРµ',
+                  : 'Новое вложение',
             );
           }
 
@@ -842,7 +842,7 @@ class _ChatScreenState extends State<ChatScreen> {
         final attachmentId = uploaded['id']?.toString();
 
         if (attachmentId == null || attachmentId.isEmpty) {
-          throw Exception('РЎРµСЂРІРµСЂ РЅРµ РІРµСЂРЅСѓР» attachment id');
+          throw Exception('Сервер не вернул attachment id');
         }
 
         await _sendMessage(
@@ -863,9 +863,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: sentCount == 1
-            ? 'Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ'
-            : 'РћС‚РїСЂР°РІР»РµРЅРѕ С„Р°Р№Р»РѕРІ: $sentCount',
+        message:
+            sentCount == 1 ? 'Файл отправлен' : 'Отправлено файлов: $sentCount',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -905,8 +904,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final files = result.files.where((file) => file.bytes != null).toList();
 
       if (files.isEmpty) {
-        _showError(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ С„Р°Р№Р»С‹');
+        _showError('Не удалось прочитать выбранные файлы');
         return;
       }
 
@@ -959,8 +957,8 @@ class _ChatScreenState extends State<ChatScreen> {
         TopNotification.success(
           context,
           message: files.length == 1
-              ? 'Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ'
-              : 'Р¤Р°Р№Р»С‹ РѕС‚РїСЂР°РІР»РµРЅС‹: ${files.length}',
+              ? 'Файл отправлен'
+              : 'Файлы отправлены: ${files.length}',
         );
       }
     } catch (e) {
@@ -981,7 +979,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final hasPermission = await _recorder.hasPermission();
 
       if (!hasPermission) {
-        _showError('РќРµС‚ РґРѕСЃС‚СѓРїР° Рє РјРёРєСЂРѕС„РѕРЅСѓ');
+        _showError('Нет доступа к микрофону');
         return;
       }
 
@@ -1081,7 +1079,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _sendChatActivity('sending_audio');
 
       if (_recordedPcmBytes.isEmpty) {
-        _showError('Р“РѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РїСѓСЃС‚РѕРµ');
+        _showError('Голосовое сообщение пустое');
         return;
       }
 
@@ -1111,7 +1109,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         TopNotification.success(
           context,
-          message: 'Р“РѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ',
+          message: 'Голосовое сообщение отправлено',
         );
       }
     } catch (e) {
@@ -1156,7 +1154,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.info(
         context,
-        message: 'Р—Р°РїРёСЃСЊ РѕС‚РјРµРЅРµРЅР°',
+        message: 'Запись отменена',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1231,12 +1229,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'РћС‚РїСЂР°РІРёС‚СЊ С„Р°Р№Р»С‹',
+                        'Отправить файлы',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Р’С‹Р±СЂР°РЅРѕ: ${files.length}',
+                        'Выбрано: ${files.length}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -1245,12 +1243,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           ButtonSegment(
                             value: _AttachmentMode.media,
                             icon: Icon(Icons.perm_media_outlined),
-                            label: Text('РњРµРґРёР°'),
+                            label: Text('Медиа'),
                           ),
                           ButtonSegment(
                             value: _AttachmentMode.file,
                             icon: Icon(Icons.insert_drive_file_outlined),
-                            label: Text('Р¤Р°Р№Р»С‹'),
+                            label: Text('Файлы'),
                           ),
                         ],
                         selected: {mode},
@@ -1266,9 +1264,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         minLines: 1,
                         maxLines: 4,
                         decoration: const InputDecoration(
-                          labelText: 'РџРѕРґРїРёСЃСЊ',
-                          hintText:
-                              'РџРѕРґРїРёСЃСЊ РґРѕР±Р°РІРёС‚СЃСЏ Рє РїРµСЂРІРѕРјСѓ С„Р°Р№Р»Сѓ',
+                          labelText: 'Подпись',
+                          hintText: 'Подпись добавится к первому файлу',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -1304,7 +1301,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               onPressed: () {
                                 Navigator.of(context).pop(null);
                               },
-                              child: const Text('РћС‚РјРµРЅР°'),
+                              child: const Text('Отмена'),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -1319,7 +1316,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 );
                               },
                               icon: const Icon(Icons.send),
-                              label: const Text('РћС‚РїСЂР°РІРёС‚СЊ'),
+                              label: const Text('Отправить'),
                             ),
                           ),
                         ],
@@ -1410,55 +1407,54 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.add_reaction_outlined),
-                title: const Text('Р РµР°РєС†РёСЏ emoji'),
+                title: const Text('Реакция emoji'),
                 onTap: () => Navigator.of(context).pop('emoji_reaction'),
               ),
               ListTile(
                 leading: const Icon(Icons.image_outlined),
-                title: const Text('Р РµР°РєС†РёСЏ РєР°СЂС‚РёРЅРєРѕР№'),
+                title: const Text('Реакция картинкой'),
                 onTap: () => Navigator.of(context).pop('image_reaction'),
               ),
               if (hasMyReaction)
                 ListTile(
                   leading: const Icon(Icons.close),
-                  title: const Text('РЈР±СЂР°С‚СЊ РјРѕСЋ СЂРµР°РєС†РёСЋ'),
+                  title: const Text('Убрать мою реакцию'),
                   onTap: () => Navigator.of(context).pop('remove_reaction'),
                 ),
               const Divider(height: 1),
               if (hasText)
                 ListTile(
                   leading: const Icon(Icons.copy_rounded),
-                  title: const Text('РљРѕРїРёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚'),
+                  title: const Text('Копировать текст'),
                   onTap: () => Navigator.of(context).pop('copy'),
                 ),
               ListTile(
                 leading: const Icon(Icons.shortcut_rounded),
-                title: const Text('РџРµСЂРµСЃР»Р°С‚СЊ'),
+                title: const Text('Переслать'),
                 onTap: () => Navigator.of(context).pop('forward'),
               ),
               ListTile(
                 leading:
                     Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
-                title: Text(
-                    isPinned ? 'РћС‚РєСЂРµРїРёС‚СЊ' : 'Р—Р°РєСЂРµРїРёС‚СЊ'),
+                title: Text(isPinned ? 'Открепить' : 'Закрепить'),
                 onTap: () =>
                     Navigator.of(context).pop(isPinned ? 'unpin' : 'pin'),
               ),
               ListTile(
                 leading: const Icon(Icons.checklist_rounded),
-                title: const Text('Р’С‹Р±СЂР°С‚СЊ'),
+                title: const Text('Выбрать'),
                 onTap: () => Navigator.of(context).pop('select'),
               ),
               if (canEdit)
                 ListTile(
                   leading: const Icon(Icons.edit),
-                  title: const Text('Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ'),
+                  title: const Text('Редактировать'),
                   onTap: () => Navigator.of(context).pop('edit'),
                 ),
               if (isMine)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
-                  title: const Text('РЈРґР°Р»РёС‚СЊ'),
+                  title: const Text('Удалить'),
                   onTap: () => Navigator.of(context).pop('delete'),
                 ),
             ],
@@ -1515,8 +1511,7 @@ class _ChatScreenState extends State<ChatScreen> {
     await Clipboard.setData(ClipboardData(text: text));
 
     if (!mounted) return;
-    TopNotification.success(context,
-        message: 'РўРµРєСЃС‚ СЃРєРѕРїРёСЂРѕРІР°РЅ');
+    TopNotification.success(context, message: 'Текст скопирован');
   }
 
   Future<void> _pinMessage(Map<String, dynamic> message) async {
@@ -1539,8 +1534,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _syncPinnedFlag();
       });
 
-      TopNotification.success(context,
-          message: 'РЎРѕРѕР±С‰РµРЅРёРµ Р·Р°РєСЂРµРїР»РµРЅРѕ');
+      TopNotification.success(context, message: 'Сообщение закреплено');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1558,8 +1552,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _syncPinnedFlag();
       });
 
-      TopNotification.info(context,
-          message: 'РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РєСЂРµРїР»РµРЅРѕ');
+      TopNotification.info(context, message: 'Сообщение откреплено');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1586,7 +1579,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
                     child: Text(
-                      'РџРµСЂРµСЃР»Р°С‚СЊ РІ С‡Р°С‚',
+                      'Переслать в чат',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
@@ -1598,7 +1591,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       itemBuilder: (context, index) {
                         final chat =
                             Map<String, dynamic>.from(list[index] as Map);
-                        final title = chat['title']?.toString() ?? 'Р§Р°С‚';
+                        final title = chat['title']?.toString() ?? 'Чат';
                         final isGroup = chat['is_group'] == true;
 
                         return ListTile(
@@ -1608,8 +1601,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 : Icons.person_rounded),
                           ),
                           title: Text(title),
-                          subtitle: Text(
-                              isGroup ? 'Р“СЂСѓРїРїР°' : 'Р›РёС‡РЅС‹Р№ С‡Р°С‚'),
+                          subtitle: Text(isGroup ? 'Группа' : 'Личный чат'),
                           onTap: () => Navigator.of(context).pop(chat),
                         );
                       },
@@ -1631,8 +1623,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       if (!mounted) return;
-      TopNotification.success(context,
-          message: 'РЎРѕРѕР±С‰РµРЅРёРµ РїРµСЂРµСЃР»Р°РЅРѕ');
+      TopNotification.success(context, message: 'Сообщение переслано');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1650,16 +1641,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickEmojiReaction(Map<String, dynamic> message) async {
     final controller = TextEditingController();
-    const quickEmojis = [
-      'рџ‘Ќ',
-      'вќ¤пёЏ',
-      'рџ‚',
-      'рџ”Ґ',
-      'рџҐ°',
-      'рџ®',
-      'рџў',
-      'рџ‘Џ'
-    ];
+    const quickEmojis = ['👍', '❤️', '😂', '🔥', '🥰', '😮', '😢', '👏'];
 
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1677,7 +1659,7 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Р’С‹Р±РµСЂРёС‚Рµ СЂРµР°РєС†РёСЋ',
+                  'Выберите реакцию',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
@@ -1711,7 +1693,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: controller,
                   autofocus: true,
                   decoration: const InputDecoration(
-                    labelText: 'Р›СЋР±РѕР№ emoji РёР»Рё СЃРёРјРІРѕР»',
+                    labelText: 'Любой emoji или символ',
                     border: OutlineInputBorder(),
                   ),
                   onSubmitted: (value) {
@@ -1726,7 +1708,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     if (text.isNotEmpty) Navigator.of(context).pop(text);
                   },
                   icon: const Icon(Icons.check),
-                  label: const Text('РџРѕСЃС‚Р°РІРёС‚СЊ'),
+                  label: const Text('Поставить'),
                 ),
               ],
             ),
@@ -1780,8 +1762,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = file.bytes;
 
       if (bytes == null) {
-        _showError(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
+        _showError('Не удалось прочитать изображение');
         return;
       }
 
@@ -1813,7 +1794,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Р РµР°РєС†РёСЏ-РєР°СЂС‚РёРЅРєР° РґРѕР±Р°РІР»РµРЅР°',
+        message: 'Реакция-картинка добавлена',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1903,7 +1884,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ'),
+          title: const Text('Редактировать сообщение'),
           content: TextField(
             controller: controller,
             autofocus: true,
@@ -1911,13 +1892,13 @@ class _ChatScreenState extends State<ChatScreen> {
             maxLines: 5,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
-              labelText: 'РўРµРєСЃС‚',
+              labelText: 'Текст',
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('РћС‚РјРµРЅР°'),
+              child: const Text('Отмена'),
             ),
             FilledButton(
               onPressed: () {
@@ -1927,7 +1908,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 Navigator.of(context).pop(text);
               },
-              child: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ'),
+              child: const Text('Сохранить'),
             ),
           ],
         );
@@ -1965,7 +1946,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'РЎРѕРѕР±С‰РµРЅРёРµ РёР·РјРµРЅРµРЅРѕ',
+        message: 'Сообщение изменено',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1977,17 +1958,16 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ?'),
-          content:
-              const Text('РЎРѕРѕР±С‰РµРЅРёРµ РёСЃС‡РµР·РЅРµС‚ РёР· С‡Р°С‚Р°.'),
+          title: const Text('Удалить сообщение?'),
+          content: const Text('Сообщение исчезнет из чата.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('РћС‚РјРµРЅР°'),
+              child: const Text('Отмена'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('РЈРґР°Р»РёС‚СЊ'),
+              child: const Text('Удалить'),
             ),
           ],
         );
@@ -2010,7 +1990,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'РЎРѕРѕР±С‰РµРЅРёРµ СѓРґР°Р»РµРЅРѕ',
+        message: 'Сообщение удалено',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2236,20 +2216,20 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹'),
+          title: const Text('Название группы'),
           content: TextField(
             controller: controller,
             autofocus: true,
             maxLength: 120,
             decoration: const InputDecoration(
-              labelText: 'РќР°Р·РІР°РЅРёРµ',
+              labelText: 'Название',
               border: OutlineInputBorder(),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('РћС‚РјРµРЅР°'),
+              child: const Text('Отмена'),
             ),
             FilledButton(
               onPressed: () {
@@ -2257,7 +2237,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (text.isEmpty) return;
                 Navigator.of(context).pop(text);
               },
-              child: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ'),
+              child: const Text('Сохранить'),
             ),
           ],
         );
@@ -2280,7 +2260,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹ РёР·РјРµРЅРµРЅРѕ',
+        message: 'Название группы изменено',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2301,8 +2281,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = file.bytes;
 
       if (bytes == null) {
-        _showError(
-            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
+        _showError('Не удалось прочитать изображение');
         return;
       }
 
@@ -2316,7 +2295,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'РђРІР°С‚Р°СЂ РіСЂСѓРїРїС‹ РѕР±РЅРѕРІР»С‘РЅ',
+        message: 'Аватар группы обновлён',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2336,7 +2315,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (added == true && mounted) {
       TopNotification.success(
         context,
-        message: 'РЈС‡Р°СЃС‚РЅРёРєРё РґРѕР±Р°РІР»РµРЅС‹',
+        message: 'Участники добавлены',
       );
     }
   }
@@ -2346,17 +2325,16 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Р’С‹Р№С‚Рё РёР· РіСЂСѓРїРїС‹?'),
-          content: const Text(
-              'Р“СЂСѓРїРїР° РёСЃС‡РµР·РЅРµС‚ РёР· СЃРїРёСЃРєР° РІР°С€РёС… С‡Р°С‚РѕРІ.'),
+          title: const Text('Выйти из группы?'),
+          content: const Text('Группа исчезнет из списка ваших чатов.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('РћС‚РјРµРЅР°'),
+              child: const Text('Отмена'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Р’С‹Р№С‚Рё'),
+              child: const Text('Выйти'),
             ),
           ],
         );
@@ -2581,18 +2559,18 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             IconButton(
-              tooltip: 'РЈРґР°Р»РёС‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ',
+              tooltip: 'Удалить выбранные',
               onPressed: _deleteSelectedMessages,
               icon: const Icon(Icons.delete_outline_rounded),
             ),
             IconButton(
-              tooltip: 'РћС‚РјРµРЅРёС‚СЊ РІС‹Р±РѕСЂ',
+              tooltip: 'Отменить выбор',
               onPressed: _clearSelection,
               icon: const Icon(Icons.close_rounded),
             ),
           ] else if (widget.isGroup)
             IconButton(
-              tooltip: 'РРЅС„РѕСЂРјР°С†РёСЏ Рѕ РіСЂСѓРїРїРµ',
+              tooltip: 'Информация о группе',
               onPressed: _openGroupInfo,
               icon: const Icon(Icons.more_vert_rounded),
             ),
@@ -2628,8 +2606,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: const [
                               SizedBox(height: 220),
                               Center(
-                                child:
-                                    Text('РџРѕРєР° РЅРµС‚ СЃРѕРѕР±С‰РµРЅРёР№'),
+                                child: Text('Пока нет сообщений'),
                               ),
                             ],
                           )
@@ -2722,7 +2699,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     Row(
                       children: [
                         IconButton(
-                          tooltip: 'РџСЂРёРєСЂРµРїРёС‚СЊ С„Р°Р№Р»С‹',
+                          tooltip: 'Прикрепить файлы',
                           onPressed: _sending || _recording
                               ? null
                               : _openInternalFileManager,
@@ -2744,9 +2721,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             decoration: InputDecoration(
                               hintText: _recording
                                   ? (_recordLocked
-                                      ? 'РђРІС‚РѕР·Р°РїРёСЃСЊ РёРґС‘С‚'
-                                      : 'РџРѕС‚СЏРЅРёС‚Рµ РІРІРµСЂС… РґР»СЏ Р°РІС‚РѕР·Р°РїРёСЃРё')
-                                  : 'РЎРѕРѕР±С‰РµРЅРёРµ',
+                                      ? 'Автозапись идёт'
+                                      : 'Потяните вверх для автозаписи')
+                                  : 'Сообщение',
                               filled: true,
                               fillColor: inputFillColor,
                               hintStyle: TextStyle(color: inputHintColor),
@@ -2818,8 +2795,8 @@ class _PinnedMessageBar extends StatelessWidget {
     final subtitle = text != null && text.isNotEmpty
         ? text
         : attachment is Map
-            ? attachment['original_name']?.toString() ?? 'Р’Р»РѕР¶РµРЅРёРµ'
-            : 'РЎРѕРѕР±С‰РµРЅРёРµ';
+            ? attachment['original_name']?.toString() ?? 'Вложение'
+            : 'Сообщение';
 
     return Material(
       color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
@@ -2846,8 +2823,8 @@ class _PinnedMessageBar extends StatelessWidget {
                   children: [
                     Text(
                       forwarded != null && forwarded.isNotEmpty
-                          ? 'Р—Р°РєСЂРµРїР»РµРЅРѕ В· РїРµСЂРµСЃР»Р°РЅРѕ РѕС‚ $forwarded'
-                          : 'Р—Р°РєСЂРµРїР»С‘РЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ',
+                          ? 'Закреплено · переслано от $forwarded'
+                          : 'Закреплённое сообщение',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -2866,7 +2843,7 @@ class _PinnedMessageBar extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: 'РћС‚РєСЂРµРїРёС‚СЊ',
+                tooltip: 'Открепить',
                 onPressed: onUnpin,
                 icon: const Icon(Icons.close_rounded),
               ),
@@ -2948,9 +2925,7 @@ class _VoiceRecordingPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  locked
-                      ? 'РђРІС‚РѕР·Р°РїРёСЃСЊ РІРєР»СЋС‡РµРЅР°'
-                      : 'РРґС‘С‚ Р·Р°РїРёСЃСЊ РіРѕР»РѕСЃРѕРІРѕРіРѕ',
+                  locked ? 'Автозапись включена' : 'Идёт запись голосового',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2961,8 +2936,8 @@ class _VoiceRecordingPanel extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   locked
-                      ? '${_elapsedText()} В· РЅР°Р¶РјРёС‚Рµ РјРёРєСЂРѕС„РѕРЅ, С‡С‚РѕР±С‹ РѕС‚РїСЂР°РІРёС‚СЊ'
-                      : '${_elapsedText()} В· РѕС‚РїСѓСЃС‚РёС‚Рµ РґР»СЏ РѕС‚РїСЂР°РІРєРё РёР»Рё РїРѕС‚СЏРЅРёС‚Рµ РІРІРµСЂС…',
+                      ? '${_elapsedText()} · нажмите микрофон, чтобы отправить'
+                      : '${_elapsedText()} · отпустите для отправки или потяните вверх',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2976,13 +2951,13 @@ class _VoiceRecordingPanel extends StatelessWidget {
           ),
           if (!locked)
             IconButton(
-              tooltip: 'Р—Р°РєСЂРµРїРёС‚СЊ Р·Р°РїРёСЃСЊ',
+              tooltip: 'Закрепить запись',
               onPressed: onLock,
               color: accent,
               icon: const Icon(Icons.lock_open_rounded),
             ),
           IconButton(
-            tooltip: 'РћС‚РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊ',
+            tooltip: 'Отменить запись',
             onPressed: onCancel,
             color: Colors.redAccent,
             icon: const Icon(Icons.delete_outline_rounded),
@@ -3210,7 +3185,7 @@ class _GroupInfoSheet extends StatelessWidget {
                                   ),
                         ),
                         Text(
-                          'Р“СЂСѓРїРїРѕРІРѕР№ С‡Р°С‚',
+                          'Групповой чат',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -3226,23 +3201,23 @@ class _GroupInfoSheet extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onRename,
                     icon: const Icon(Icons.edit_outlined),
-                    label: const Text('РќР°Р·РІР°РЅРёРµ'),
+                    label: const Text('Название'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onPickAvatar,
                     icon: const Icon(Icons.image_outlined),
-                    label: const Text('РђРІР°С‚Р°СЂ'),
+                    label: const Text('Аватар'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onAddMembers,
                     icon: const Icon(Icons.person_add_alt_1_outlined),
-                    label: const Text('Р”РѕР±Р°РІРёС‚СЊ'),
+                    label: const Text('Добавить'),
                   ),
                 ],
               ),
               const SizedBox(height: 14),
               Text(
-                'РЈС‡Р°СЃС‚РЅРёРєРё',
+                'Участники',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -3257,9 +3232,7 @@ class _GroupInfoSheet extends StatelessWidget {
                     final members = snapshot.data ?? [];
 
                     if (members.isEmpty) {
-                      return const Center(
-                          child:
-                              Text('РЈС‡Р°СЃС‚РЅРёРєРё РЅРµ РЅР°Р№РґРµРЅС‹'));
+                      return const Center(child: Text('Участники не найдены'));
                     }
 
                     return ListView.builder(
@@ -3267,8 +3240,8 @@ class _GroupInfoSheet extends StatelessWidget {
                       itemBuilder: (context, index) {
                         final member =
                             Map<String, dynamic>.from(members[index] as Map);
-                        final name = member['name']?.toString() ??
-                            'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ';
+                        final name =
+                            member['name']?.toString() ?? 'Пользователь';
                         final username = member['username']?.toString() ?? '';
                         final avatarUrl = member['avatar_url']?.toString();
                         final role = member['role']?.toString() ?? 'member';
@@ -3288,7 +3261,7 @@ class _GroupInfoSheet extends StatelessWidget {
                             ),
                             title: Text(name),
                             subtitle: Text(
-                              username.isEmpty ? role : '@$username В· $role',
+                              username.isEmpty ? role : '@$username · $role',
                             ),
                           ),
                         );
@@ -3301,7 +3274,7 @@ class _GroupInfoSheet extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onLeave,
                 icon: const Icon(Icons.logout),
-                label: const Text('Р’С‹Р№С‚Рё РёР· РіСЂСѓРїРїС‹'),
+                label: const Text('Выйти из группы'),
               ),
             ],
           ),
@@ -3376,7 +3349,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
     final nickname = user['nickname']?.toString().trim();
     if (nickname != null && nickname.isNotEmpty) return nickname;
 
-    return user['username']?.toString() ?? 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ';
+    return user['username']?.toString() ?? 'Пользователь';
   }
 
   void _toggle(Map<String, dynamic> user) {
@@ -3430,7 +3403,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Р”РѕР±Р°РІРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ',
+                      'Добавить участников',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -3442,7 +3415,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text('Р”РѕР±Р°РІРёС‚СЊ (${_selected.length})'),
+                        : Text('Добавить (${_selected.length})'),
                   ),
                 ],
               ),
@@ -3452,7 +3425,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                 enabled: !_saving,
                 onChanged: _onChanged,
                 decoration: InputDecoration(
-                  labelText: 'РќР°Р№С‚Рё РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№',
+                  labelText: 'Найти пользователей',
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _searching
                       ? const Padding(
@@ -3473,8 +3446,8 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                     ? Center(
                         child: Text(
                           _queryController.text.trim().length < 2
-                              ? 'Р’РІРµРґРёС‚Рµ РјРёРЅРёРјСѓРј 2 СЃРёРјРІРѕР»Р°'
-                              : 'РќРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ',
+                              ? 'Введите минимум 2 символа'
+                              : 'Ничего не найдено',
                         ),
                       )
                     : ListView.builder(
@@ -3868,7 +3841,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Р’РёРґРµРѕ',
+                      'Видео',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
@@ -3886,7 +3859,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                         mode: LaunchMode.externalApplication,
                       ),
                       icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('РћС‚РєСЂС‹С‚СЊ РІРёРґРµРѕ'),
+                      label: const Text('Открыть видео'),
                     ),
                   ],
                 ),
@@ -3905,7 +3878,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                   ),
                   Expanded(
                     child: Text(
-                      '${_index + 1} РёР· ${widget.messages.length}',
+                      '${_index + 1} из ${widget.messages.length}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white,
@@ -3956,8 +3929,8 @@ Future<void> _exportAlbumEntries(
     SnackBar(
       content: Text(
         savedCount > 0
-            ? '$successMessage В· $savedCount С€С‚.'
-            : 'РќР° СЌС‚РѕР№ РїР»Р°С‚С„РѕСЂРјРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РІРЅСѓС‚СЂРµРЅРЅРµРµ СЃРєР°С‡РёРІР°РЅРёРµ UMe',
+            ? '$successMessage · $savedCount шт.'
+            : 'На этой платформе доступно только внутреннее скачивание UMe',
       ),
     ),
   );
@@ -3985,7 +3958,7 @@ Future<void> _showAlbumSaveSheet(
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'РђР»СЊР±РѕРј СЃРєР°С‡Р°РЅ РІ UMe В· ${entries.length} РјРµРґРёР°',
+                      'Альбом скачан в UMe · ${entries.length} медиа',
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                   ),
@@ -3994,25 +3967,24 @@ Future<void> _showAlbumSaveSheet(
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text(
-                  'РЎРѕС…СЂР°РЅРёС‚СЊ Р°Р»СЊР±РѕРј РІ РіР°Р»РµСЂРµСЋ'),
+              title: const Text('Сохранить альбом в галерею'),
               subtitle: const Text(
-                  'Р’ Р±СЂР°СѓР·РµСЂРµ С„Р°Р№Р»С‹ СЃРѕС…СЂР°РЅСЏСЋС‚СЃСЏ С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅС‹Рµ Р·Р°РіСЂСѓР·РєРё'),
+                  'В браузере файлы сохраняются через системные загрузки'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 entries,
-                'РђР»СЊР±РѕРј РїРµСЂРµРґР°РЅ РЅР° СЃРѕС…СЂР°РЅРµРЅРёРµ РІ РіР°Р»РµСЂРµСЋ',
+                'Альбом передан на сохранение в галерею',
               ),
             ),
             ListTile(
               leading: const Icon(Icons.folder_copy_outlined),
-              title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ Р·Р°РіСЂСѓР·РєРё'),
+              title: const Text('Сохранить в загрузки'),
               subtitle: const Text(
-                  'РЎРєР°С‡Р°С‚СЊ РјРµРґРёР° РёР· РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РєРµС€Р° UMe РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'),
+                  'Скачать медиа из внутреннего кеша UMe на устройство'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 entries,
-                'РђР»СЊР±РѕРј РїРµСЂРµРґР°РЅ РІ Р·Р°РіСЂСѓР·РєРё',
+                'Альбом передан в загрузки',
               ),
             ),
           ],
@@ -4057,24 +4029,24 @@ Future<void> _exportSingleAlbumEntry(
             if (isMedia)
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ РіР°Р»РµСЂРµСЋ'),
+                title: const Text('Сохранить в галерею'),
                 subtitle: const Text(
-                    'Р’ Р±СЂР°СѓР·РµСЂРµ С„Р°Р№Р» СЃРѕС…СЂР°РЅРёС‚СЃСЏ С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅСѓСЋ Р·Р°РіСЂСѓР·РєСѓ'),
+                    'В браузере файл сохранится через системную загрузку'),
                 onTap: () => _exportAlbumEntries(
                   sheetContext,
                   [entry],
-                  'Р¤Р°Р№Р» РїРµСЂРµРґР°РЅ РЅР° СЃРѕС…СЂР°РЅРµРЅРёРµ РІ РіР°Р»РµСЂРµСЋ',
+                  'Файл передан на сохранение в галерею',
                 ),
               ),
             ListTile(
               leading: const Icon(Icons.folder_copy_outlined),
-              title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ Р·Р°РіСЂСѓР·РєРё'),
+              title: const Text('Сохранить в загрузки'),
               subtitle: const Text(
-                  'РЎРєР°С‡Р°С‚СЊ С„Р°Р№Р» РёР· РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РєРµС€Р° UMe РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'),
+                  'Скачать файл из внутреннего кеша UMe на устройство'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 [entry],
-                'Р¤Р°Р№Р» РїРµСЂРµРґР°РЅ РІ Р·Р°РіСЂСѓР·РєРё',
+                'Файл передан в загрузки',
               ),
             ),
           ],
@@ -4178,9 +4150,7 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
       setState(() => _downloading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ Р°Р»СЊР±РѕРј РІРЅСѓС‚СЂРё UMe')),
+        const SnackBar(content: Text('Не удалось скачать альбом внутри UMe')),
       );
     }
   }
@@ -4192,8 +4162,8 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
 
     return Tooltip(
       message: allDownloaded
-          ? 'РЎРѕС…СЂР°РЅРёС‚СЊ Р°Р»СЊР±РѕРј РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'
-          : 'РЎРєР°С‡Р°С‚СЊ Р°Р»СЊР±РѕРј РІРЅСѓС‚СЂРё UMe',
+          ? 'Сохранить альбом на устройство'
+          : 'Скачать альбом внутри UMe',
       child: Material(
         color: Colors.black.withValues(alpha: 0.58),
         shape: const CircleBorder(),
@@ -4328,9 +4298,7 @@ class _AlbumViewerDownloadButtonState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ РјРµРґРёР° РІРЅСѓС‚СЂРё UMe')),
+        const SnackBar(content: Text('Не удалось скачать медиа внутри UMe')),
       );
     }
   }
@@ -4340,9 +4308,7 @@ class _AlbumViewerDownloadButtonState
     final downloaded = AttachmentDownloadStore.isDownloaded(_url);
 
     return IconButton(
-      tooltip: downloaded
-          ? 'РЎРєР°С‡Р°РЅРѕ РІ UMe'
-          : 'РЎРєР°С‡Р°С‚СЊ РІРЅСѓС‚СЂРё UMe',
+      tooltip: downloaded ? 'Скачано в UMe' : 'Скачать внутри UMe',
       onPressed: _download,
       color: Colors.white,
       icon: Stack(
