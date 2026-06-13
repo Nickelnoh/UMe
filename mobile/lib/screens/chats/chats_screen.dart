@@ -126,6 +126,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
           if (!mounted) return;
 
           if (senderId != null && senderId != _myUserId) {
+            final messageId = message['id']?.toString();
+            if (messageId != null && messageId.isNotEmpty) {
+              unawaited(_markMessagesDelivered([messageId]));
+            }
+
             final title = _chatTitleById(event['chat_id']?.toString());
             final text = message['text']?.toString().trim();
 
@@ -140,7 +145,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           return;
         }
 
-        if (type == 'message.updated' || type == 'message.deleted') {
+        if (type == 'message.updated' || type == 'message.deleted' || type == 'messages.deleted') {
           await _loadChats(silent: true);
           return;
         }
@@ -204,6 +209,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
       });
     } catch (e) {
       _showError(_cleanError(e));
+    }
+  }
+
+  Future<void> _markMessagesDelivered(List<String> ids) async {
+    final messageIds = ids.where((id) => id.trim().isNotEmpty).toList();
+    if (messageIds.isEmpty) return;
+
+    try {
+      await ApiClient.post('/messages/delivered', {'message_ids': messageIds});
+    } catch (_) {
+      // Статусы доставки не должны ломать список чатов.
     }
   }
 
@@ -381,6 +397,75 @@ class _ChatsScreenState extends State<ChatsScreen> {
       );
     } catch (e) {
       _showError(_cleanError(e));
+    }
+  }
+
+  Future<void> _contactDeveloper() async {
+    final controller = TextEditingController();
+
+    final message = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Связь с разработчиком'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText: 'Опишите проблему или предложение',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: const Text('Открыть чат'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (message == null) return;
+
+    try {
+      final result = await ApiClient.post(
+        '/support/developer-chat',
+        {'message': message.trim().isEmpty ? null : message.trim()},
+      );
+
+      if (!mounted) return;
+
+      final chat = result is Map && result['chat'] is Map
+          ? Map<String, dynamic>.from(result['chat'] as Map)
+          : null;
+
+      if (chat == null) {
+        throw Exception('Сервер не вернул чат разработчика');
+      }
+
+      await _loadChats(silent: true);
+
+      final chatId = chat['id']?.toString();
+      final title = chat['title']?.toString() ?? 'Разработчик';
+
+      if (chatId != null && chatId.isNotEmpty) {
+        _openChat(chatId, title);
+      }
+    } catch (e) {
+      var error = _cleanError(e);
+      if (error.contains('Developer contact is not configured')) {
+        error = 'Контакт разработчика не настроен на сервере. Укажи DEVELOPER_USERNAME или DEVELOPER_USER_ID в .env';
+      }
+      _showError(error);
     }
   }
 
@@ -649,6 +734,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
               onSettings: () {
                 Navigator.of(dialogContext).pop();
                 _openSettings();
+              },
+              onContactDeveloper: () {
+                Navigator.of(dialogContext).pop();
+                _contactDeveloper();
               },
               onRefresh: () {
                 Navigator.of(dialogContext).pop();
@@ -1474,6 +1563,7 @@ class _MobileSideMenu extends StatelessWidget {
   final VoidCallback onFindUser;
   final VoidCallback onCreateGroup;
   final VoidCallback onSettings;
+  final VoidCallback onContactDeveloper;
   final VoidCallback onRefresh;
   final VoidCallback onEnablePush;
   final VoidCallback onLogout;
@@ -1485,6 +1575,7 @@ class _MobileSideMenu extends StatelessWidget {
     required this.onFindUser,
     required this.onCreateGroup,
     required this.onSettings,
+    required this.onContactDeveloper,
     required this.onRefresh,
     required this.onEnablePush,
     required this.onLogout,
@@ -1548,6 +1639,13 @@ class _MobileSideMenu extends StatelessWidget {
                     title: 'Настройки',
                     subtitle: 'Профиль, внешний вид, уведомления',
                     onTap: onSettings,
+                    accent: accent,
+                  ),
+                  _MobileSideMenuItem(
+                    icon: Icons.support_agent_rounded,
+                    title: 'Связь с разработчиком',
+                    subtitle: 'Написать разработчику UMe',
+                    onTap: onContactDeveloper,
                     accent: accent,
                   ),
                   _MobileSideMenuItem(

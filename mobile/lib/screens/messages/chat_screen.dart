@@ -3,11 +3,13 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../core/attachment_download_store.dart';
+import '../../core/attachment_file_saver.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/top_notification.dart';
@@ -70,6 +72,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<int> _recordedPcmBytes = [];
   List<dynamic> _messages = [];
+  Map<String, dynamic>? _pinnedMessage;
+  final Set<String> _selectedMessageIds = <String>{};
+  bool _selectionMode = false;
 
   static const int _voiceSampleRate = 16000;
   static const int _voiceChannels = 1;
@@ -86,6 +91,7 @@ class _ChatScreenState extends State<ChatScreen> {
     await _loadMe();
     await _loadPresence();
     await _loadMessages();
+    await _loadPinnedMessage();
     await _connectWebSocket();
   }
 
@@ -164,6 +170,190 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {
       // Статус не должен ломать открытие чата.
     }
+  }
+
+  Future<void> _loadPinnedMessage() async {
+    try {
+      final result = await ApiClient.get('/chats/${widget.chatId}/pinned-message');
+
+      if (!mounted || result is! Map) return;
+
+      final raw = result['message'];
+      setState(() {
+        _pinnedMessage = raw is Map ? Map<String, dynamic>.from(raw) : null;
+        _syncPinnedFlag();
+      });
+    } catch (_) {
+      // Закреп не должен ломать открытие чата.
+    }
+  }
+
+  void _syncPinnedFlag() {
+    final pinnedId = _pinnedMessage?['id']?.toString();
+
+    _messages = _messages.map((item) {
+      final message = Map<String, dynamic>.from(item as Map);
+      message['pinned'] = pinnedId != null && message['id']?.toString() == pinnedId;
+      return message;
+    }).toList();
+  }
+
+  Future<void> _markMessagesDelivered(List<String> messageIds) async {
+    final ids = messageIds.where((id) => id.trim().isNotEmpty).toList();
+    if (ids.isEmpty) return;
+
+    try {
+      await ApiClient.post('/messages/delivered', {'message_ids': ids});
+    } catch (_) {
+      // Статусы доставки не должны ломать чат.
+    }
+  }
+
+  Future<void> _markChatRead() async {
+    try {
+      await ApiClient.post('/chats/${widget.chatId}/messages/read', {});
+    } catch (_) {
+      // Статусы прочтения не должны ломать чат.
+    }
+  }
+
+  void _applyReceiptStatus(List<dynamic> rawIds, String status) {
+    final ids = rawIds.map((item) => item.toString()).toSet();
+    if (ids.isEmpty) return;
+
+    setState(() {
+      _messages = _messages.map((item) {
+        final message = Map<String, dynamic>.from(item as Map);
+        final id = message['id']?.toString();
+
+        if (id != null && ids.contains(id) && message['is_mine'] == true) {
+          final current = message['delivery_status']?.toString();
+
+          if (status == 'read' || current != 'read') {
+            message['delivery_status'] = status;
+          }
+        }
+
+        return message;
+      }).toList();
+    });
+  }
+
+  void _enterSelection(Map<String, dynamic> message) {
+    final id = message['id']?.toString();
+    if (id == null || id.isEmpty) return;
+
+    setState(() {
+      _selectionMode = true;
+      _selectedMessageIds.add(id);
+    });
+  }
+
+  void _toggleSelection(Map<String, dynamic> message) {
+    final id = message['id']?.toString();
+    if (id == null || id.isEmpty) return;
+
+    setState(() {
+      if (_selectedMessageIds.contains(id)) {
+        _selectedMessageIds.remove(id);
+      } else {
+        _selectedMessageIds.add(id);
+      }
+
+      _selectionMode = _selectedMessageIds.isNotEmpty;
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedMessageIds.clear();
+    });
+  }
+
+  bool _isSelected(Map<String, dynamic> message) {
+    final id = message['id']?.toString();
+    return id != null && _selectedMessageIds.contains(id);
+  }
+
+  Future<void> _deleteSelectedMessages() async {
+    final ids = _selectedMessageIds.toList();
+    if (ids.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Удалить сообщений: ${ids.length}?'),
+          content: const Text('Удалятся только ваши сообщения. Чужие сообщения сервер не удалит.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final result = await ApiClient.post('/messages/delete-batch', {'message_ids': ids});
+      final deletedIds = result is Map && result['message_ids'] is List
+          ? List<dynamic>.from(result['message_ids'] as List).map((item) => item.toString()).toSet()
+          : ids.toSet();
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages.removeWhere((item) => deletedIds.contains((item as Map)['id']?.toString()));
+        _selectedMessageIds.removeAll(deletedIds);
+        _selectionMode = _selectedMessageIds.isNotEmpty;
+      });
+
+      TopNotification.success(context, message: 'Удалено: ${deletedIds.length}');
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
+
+  void _handleMessageTap(Map<String, dynamic> message) {
+    if (_selectionMode) {
+      _toggleSelection(message);
+    }
+  }
+
+  void _handleMessageLongPress(Map<String, dynamic> message) {
+    if (_selectionMode) {
+      _toggleSelection(message);
+      return;
+    }
+
+    _openMessageActions(message);
+  }
+
+  void _jumpToPinnedMessage() {
+    final id = _pinnedMessage?['id']?.toString();
+    if (id == null) return;
+
+    final index = _messages.indexWhere((item) => (item as Map)['id']?.toString() == id);
+    if (index == -1 || !_scrollController.hasClients) return;
+
+    final targetOffset = (index * 92.0).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
+
+    _scrollController.animateTo(
+      targetOffset,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
   }
 
   void _sendChatActivity(String activityType) {
@@ -255,6 +445,8 @@ class _ChatScreenState extends State<ChatScreen> {
         return 'отправляет видео';
       case 'sending_photo':
         return 'отправляет фото';
+      case 'sending_file':
+        return 'отправляет файл';
       default:
         return '';
     }
@@ -359,6 +551,47 @@ class _ChatScreenState extends State<ChatScreen> {
           return;
         }
 
+        if (type == 'chat.pinned_message.updated') {
+          final raw = event['message'];
+          setState(() {
+            _pinnedMessage = raw is Map ? Map<String, dynamic>.from(raw) : null;
+            _syncPinnedFlag();
+          });
+          return;
+        }
+
+        if (type == 'message.receipts_updated') {
+          final rawIds = event['message_ids'];
+          final status = event['status']?.toString() ?? 'delivered';
+
+          if (rawIds is List) {
+            _applyReceiptStatus(rawIds, status);
+          }
+
+          return;
+        }
+
+        if (type == 'messages.deleted') {
+          final rawIds = event['message_ids'];
+          if (rawIds is! List) return;
+
+          final ids = rawIds.map((item) => item.toString()).toSet();
+
+          setState(() {
+            _messages.removeWhere(
+              (item) => ids.contains((item as Map)['id']?.toString()),
+            );
+            _selectedMessageIds.removeAll(ids);
+            _selectionMode = _selectedMessageIds.isNotEmpty;
+          });
+
+          if (_pinnedMessage != null && ids.contains(_pinnedMessage!['id']?.toString())) {
+            setState(() => _pinnedMessage = null);
+          }
+
+          return;
+        }
+
         if (type == 'message.created') {
           final rawMessage = event['message'];
 
@@ -379,6 +612,12 @@ class _ChatScreenState extends State<ChatScreen> {
           });
 
           if (senderId != _myUserId) {
+            final id = message['id']?.toString();
+            if (id != null && id.isNotEmpty) {
+              unawaited(_markMessagesDelivered([id]));
+            }
+            unawaited(_markChatRead());
+
             final messageText = message['text']?.toString().trim();
 
             TopNotification.message(
@@ -430,6 +669,11 @@ class _ChatScreenState extends State<ChatScreen> {
             _messages.removeWhere(
               (item) => item['id']?.toString() == messageId,
             );
+            _selectedMessageIds.remove(messageId);
+            _selectionMode = _selectedMessageIds.isNotEmpty;
+            if (_pinnedMessage?['id']?.toString() == messageId) {
+              _pinnedMessage = null;
+            }
           });
 
           return;
@@ -522,8 +766,10 @@ class _ChatScreenState extends State<ChatScreen> {
           map['is_mine'] = map['sender_user_id']?.toString() == _myUserId;
           return map;
         }).toList();
+        _syncPinnedFlag();
       });
 
+      unawaited(_markChatRead());
       _scrollToBottom();
     } catch (e) {
       _showError(_cleanError(e));
@@ -1136,6 +1382,8 @@ class _ChatScreenState extends State<ChatScreen> {
         message['text'] != null &&
         message['text'].toString().trim().isNotEmpty;
     final hasMyReaction = _hasMyReaction(message);
+    final hasText = message['text']?.toString().trim().isNotEmpty == true;
+    final isPinned = _pinnedMessage?['id']?.toString() == message['id']?.toString();
 
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1162,6 +1410,27 @@ class _ChatScreenState extends State<ChatScreen> {
                   onTap: () => Navigator.of(context).pop('remove_reaction'),
                 ),
               const Divider(height: 1),
+              if (hasText)
+                ListTile(
+                  leading: const Icon(Icons.copy_rounded),
+                  title: const Text('Копировать текст'),
+                  onTap: () => Navigator.of(context).pop('copy'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.shortcut_rounded),
+                title: const Text('Переслать'),
+                onTap: () => Navigator.of(context).pop('forward'),
+              ),
+              ListTile(
+                leading: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+                title: Text(isPinned ? 'Открепить' : 'Закрепить'),
+                onTap: () => Navigator.of(context).pop(isPinned ? 'unpin' : 'pin'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.checklist_rounded),
+                title: const Text('Выбрать'),
+                onTap: () => Navigator.of(context).pop('select'),
+              ),
               if (canEdit)
                 ListTile(
                   leading: const Icon(Icons.edit),
@@ -1179,6 +1448,26 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       },
     );
+
+    if (selected == 'copy') {
+      await _copyMessageText(message);
+    }
+
+    if (selected == 'forward') {
+      await _forwardMessage(message);
+    }
+
+    if (selected == 'pin') {
+      await _pinMessage(message);
+    }
+
+    if (selected == 'unpin') {
+      await _unpinMessage();
+    }
+
+    if (selected == 'select') {
+      _enterSelection(message);
+    }
 
     if (selected == 'emoji_reaction') {
       await _pickEmojiReaction(message);
@@ -1198,6 +1487,125 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (selected == 'delete') {
       await _deleteMessage(message);
+    }
+  }
+
+  Future<void> _copyMessageText(Map<String, dynamic> message) async {
+    final text = message['text']?.toString() ?? '';
+    if (text.trim().isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: text));
+
+    if (!mounted) return;
+    TopNotification.success(context, message: 'Текст скопирован');
+  }
+
+  Future<void> _pinMessage(Map<String, dynamic> message) async {
+    final messageId = message['id']?.toString();
+    if (messageId == null || messageId.isEmpty) return;
+
+    try {
+      final result = await ApiClient.post(
+        '/chats/${widget.chatId}/pinned-message',
+        {'message_id': messageId},
+      );
+
+      if (!mounted) return;
+
+      final raw = result is Map ? result['message'] : null;
+      setState(() {
+        _pinnedMessage = raw is Map ? Map<String, dynamic>.from(raw) : Map<String, dynamic>.from(message);
+        _syncPinnedFlag();
+      });
+
+      TopNotification.success(context, message: 'Сообщение закреплено');
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
+
+  Future<void> _unpinMessage() async {
+    try {
+      await ApiClient.post('/chats/${widget.chatId}/pinned-message', {'message_id': null});
+
+      if (!mounted) return;
+
+      setState(() {
+        _pinnedMessage = null;
+        _syncPinnedFlag();
+      });
+
+      TopNotification.info(context, message: 'Сообщение откреплено');
+    } catch (e) {
+      _showError(_cleanError(e));
+    }
+  }
+
+  Future<void> _forwardMessage(Map<String, dynamic> message) async {
+    try {
+      final chats = await ApiClient.get('/chats');
+
+      if (!mounted) return;
+
+      final targetChat = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        showDragHandle: true,
+        builder: (context) {
+          final list = chats is List ? chats : <dynamic>[];
+
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.62,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+                    child: Text(
+                      'Переслать в чат',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: list.length,
+                      itemBuilder: (context, index) {
+                        final chat = Map<String, dynamic>.from(list[index] as Map);
+                        final title = chat['title']?.toString() ?? 'Чат';
+                        final isGroup = chat['is_group'] == true;
+
+                        return ListTile(
+                          leading: CircleAvatar(
+                            child: Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded),
+                          ),
+                          title: Text(title),
+                          subtitle: Text(isGroup ? 'Группа' : 'Личный чат'),
+                          onTap: () => Navigator.of(context).pop(chat),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+
+      final targetChatId = targetChat?['id']?.toString();
+      if (targetChatId == null || targetChatId.isEmpty) return;
+
+      await ApiClient.post(
+        '/messages/${message['id']}/forward',
+        {'target_chat_id': targetChatId},
+      );
+
+      if (!mounted) return;
+      TopNotification.success(context, message: 'Сообщение переслано');
+    } catch (e) {
+      _showError(_cleanError(e));
     }
   }
 
@@ -2112,7 +2520,31 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
-          if (widget.isGroup)
+          if (_selectionMode) ...[
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  '${_selectedMessageIds.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Удалить выбранные',
+              onPressed: _deleteSelectedMessages,
+              icon: const Icon(Icons.delete_outline_rounded),
+            ),
+            IconButton(
+              tooltip: 'Отменить выбор',
+              onPressed: _clearSelection,
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ] else if (widget.isGroup)
             IconButton(
               tooltip: 'Информация о группе',
               onPressed: _openGroupInfo,
@@ -2124,11 +2556,19 @@ class _ChatScreenState extends State<ChatScreen> {
         decoration: _wallpaperDecoration(context),
         child: Column(
           children: [
+            if (_pinnedMessage != null)
+              _PinnedMessageBar(
+                message: _pinnedMessage!,
+                accent: accent,
+                onTap: _jumpToPinnedMessage,
+                onUnpin: _unpinMessage,
+              ),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: () async {
                   await _loadMe();
                   await _loadMessages();
+                  await _loadPinnedMessage();
                 },
                 child: _loading
                     ? ListView(
@@ -2158,29 +2598,41 @@ class _ChatScreenState extends State<ChatScreen> {
                                 return _MediaAlbumBubble(
                                   messages: item.messages,
                                   accentColor: accent,
-                                  onLongPressMessage: _openMessageActions,
+                                  onLongPressMessage: (message) async => _handleMessageLongPress(message),
                                 );
                               }
 
                               final single = item as _SingleMessageRenderItem;
                               final message = single.message;
 
-                              return MessageBubble(
-                                text: message['text']?.toString(),
-                                attachment: message['attachment'] == null
-                                    ? null
-                                    : Map<String, dynamic>.from(
-                                        message['attachment'] as Map,
-                                      ),
-                                senderName: message['sender_name']?.toString(),
-                                isMine: message['is_mine'] == true,
-                                editedAt: message['edited_at']?.toString(),
-                                reactions: message['reactions'] is List
-                                    ? List<dynamic>.from(message['reactions'] as List)
-                                    : const [],
-                                accentColor: accent,
-                                bubbleStyle: _bubbleStyle,
-                                onLongPress: () => _openMessageActions(message),
+                              final selected = _isSelected(message);
+
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 140),
+                                color: selected
+                                    ? accent.withValues(alpha: 0.16)
+                                    : Colors.transparent,
+                                child: MessageBubble(
+                                  text: message['text']?.toString(),
+                                  attachment: message['attachment'] == null
+                                      ? null
+                                      : Map<String, dynamic>.from(
+                                          message['attachment'] as Map,
+                                        ),
+                                  senderName: message['sender_name']?.toString(),
+                                  isMine: message['is_mine'] == true,
+                                  editedAt: message['edited_at']?.toString(),
+                                  deliveryStatus: message['delivery_status']?.toString(),
+                                  forwardedFromName: message['forwarded_from_name']?.toString(),
+                                  pinned: message['pinned'] == true,
+                                  reactions: message['reactions'] is List
+                                      ? List<dynamic>.from(message['reactions'] as List)
+                                      : const [],
+                                  accentColor: accent,
+                                  bubbleStyle: _bubbleStyle,
+                                  onTap: () => _handleMessageTap(message),
+                                  onLongPress: () => _handleMessageLongPress(message),
+                                ),
                               );
                             },
                           ),
@@ -2284,6 +2736,88 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _PinnedMessageBar extends StatelessWidget {
+  final Map<String, dynamic> message;
+  final Color accent;
+  final VoidCallback onTap;
+  final Future<void> Function() onUnpin;
+
+  const _PinnedMessageBar({
+    required this.message,
+    required this.accent,
+    required this.onTap,
+    required this.onUnpin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = message['text']?.toString().trim();
+    final attachment = message['attachment'];
+    final forwarded = message['forwarded_from_name']?.toString().trim();
+    final subtitle = text != null && text.isNotEmpty
+        ? text
+        : attachment is Map
+            ? attachment['original_name']?.toString() ?? 'Вложение'
+            : 'Сообщение';
+
+    return Material(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.push_pin_rounded, color: accent, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      forwarded != null && forwarded.isNotEmpty
+                          ? 'Закреплено · переслано от $forwarded'
+                          : 'Закреплённое сообщение',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: accent,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Открепить',
+                onPressed: onUnpin,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3000,20 +3534,32 @@ class _MediaAlbumBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            _AlbumGrid(
-              messages: messages,
-              accentColor: accentColor,
-              onOpen: (index) {
-                showDialog<void>(
-                  context: context,
-                  builder: (_) => _AlbumViewerDialog(
+            Stack(
+              children: [
+                _AlbumGrid(
+                  messages: messages,
+                  accentColor: accentColor,
+                  onOpen: (index) {
+                    showDialog<void>(
+                      context: context,
+                      builder: (_) => _AlbumViewerDialog(
+                        messages: messages,
+                        initialIndex: index,
+                        accentColor: accentColor,
+                      ),
+                    );
+                  },
+                  onLongPressMessage: onLongPressMessage,
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: _AlbumSaveButton(
                     messages: messages,
-                    initialIndex: index,
                     accentColor: accentColor,
                   ),
-                );
-              },
-              onLongPressMessage: onLongPressMessage,
+                ),
+              ],
             ),
             if (caption.isNotEmpty) ...[
               const SizedBox(height: 6),
@@ -3153,15 +3699,7 @@ class _AlbumGrid extends StatelessWidget {
                     size: 48,
                   ),
                 ),
-              Positioned(
-                top: 6,
-                right: 6,
-                child: _AlbumDownloadBadge(
-                  attachment: attachment,
-                  fallbackUrl: url,
-                  accentColor: accentColor,
-                ),
-              ),
+
               if (overlayText != null)
                 Container(
                   color: Colors.black.withValues(alpha: 0.56),
@@ -3317,106 +3855,303 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
   }
 }
 
-class _AlbumDownloadBadge extends StatefulWidget {
-  final Map<String, dynamic> attachment;
-  final String fallbackUrl;
+
+Future<void> _exportAlbumEntries(
+  BuildContext context,
+  List<DownloadedAttachment> entries,
+  String successMessage,
+) async {
+  Navigator.of(context).pop();
+
+  var savedCount = 0;
+
+  for (final entry in entries) {
+    final saved = await saveAttachmentBytes(
+      bytes: entry.bytes,
+      name: entry.name,
+      mimeType: entry.mimeType,
+    );
+
+    if (saved) savedCount++;
+  }
+
+  if (!context.mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        savedCount > 0
+            ? '$successMessage · $savedCount шт.'
+            : 'На этой платформе доступно только внутреннее скачивание UMe',
+      ),
+    ),
+  );
+}
+
+Future<void> _showAlbumSaveSheet(
+  BuildContext context,
+  List<DownloadedAttachment> entries,
+) async {
+  if (entries.isEmpty) return;
+
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.collections_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Альбом скачан в UMe · ${entries.length} медиа',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Сохранить альбом в галерею'),
+              subtitle: const Text('В браузере файлы сохраняются через системные загрузки'),
+              onTap: () => _exportAlbumEntries(
+                sheetContext,
+                entries,
+                'Альбом передан на сохранение в галерею',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_copy_outlined),
+              title: const Text('Сохранить в загрузки'),
+              subtitle: const Text('Скачать медиа из внутреннего кеша UMe на устройство'),
+              onTap: () => _exportAlbumEntries(
+                sheetContext,
+                entries,
+                'Альбом передан в загрузки',
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _exportSingleAlbumEntry(
+  BuildContext context,
+  DownloadedAttachment entry,
+  String kind,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      final isMedia = kind == 'image' || kind == 'video';
+
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.download_done_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      entry.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isMedia)
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Сохранить в галерею'),
+                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
+                onTap: () => _exportAlbumEntries(
+                  sheetContext,
+                  [entry],
+                  'Файл передан на сохранение в галерею',
+                ),
+              ),
+            ListTile(
+              leading: const Icon(Icons.folder_copy_outlined),
+              title: const Text('Сохранить в загрузки'),
+              subtitle: const Text('Скачать файл из внутреннего кеша UMe на устройство'),
+              onTap: () => _exportAlbumEntries(
+                sheetContext,
+                [entry],
+                'Файл передан в загрузки',
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+
+class _AlbumSaveButton extends StatefulWidget {
+  final List<Map<String, dynamic>> messages;
   final Color accentColor;
 
-  const _AlbumDownloadBadge({
-    required this.attachment,
-    required this.fallbackUrl,
+  const _AlbumSaveButton({
+    required this.messages,
     required this.accentColor,
   });
 
   @override
-  State<_AlbumDownloadBadge> createState() => _AlbumDownloadBadgeState();
+  State<_AlbumSaveButton> createState() => _AlbumSaveButtonState();
 }
 
-class _AlbumDownloadBadgeState extends State<_AlbumDownloadBadge> {
+class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
   bool _downloading = false;
-  double? _progress;
+  int _done = 0;
 
-  String get _url {
-    final raw = widget.attachment['url']?.toString() ?? widget.fallbackUrl;
-    return ApiClient.absoluteUrl(raw);
+  List<Map<String, dynamic>> get _attachments {
+    return widget.messages
+        .map((message) => message['attachment'])
+        .whereType<Map>()
+        .map((raw) => Map<String, dynamic>.from(raw))
+        .where((attachment) {
+          final kind = attachment['kind']?.toString();
+          final url = attachment['url']?.toString();
+          return (kind == 'image' || kind == 'video') &&
+              url != null &&
+              url.trim().isNotEmpty;
+        })
+        .toList();
   }
 
-  String get _name => widget.attachment['original_name']?.toString() ?? 'media';
+  bool get _allDownloaded {
+    final attachments = _attachments;
+    if (attachments.isEmpty) return false;
 
-  String get _mimeType => widget.attachment['mime_type']?.toString() ?? 'application/octet-stream';
+    return attachments.every((attachment) {
+      final url = ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
+      return AttachmentDownloadStore.isDownloaded(url);
+    });
+  }
 
-  Future<void> _download() async {
+  List<DownloadedAttachment> get _downloadedEntries {
+    return _attachments
+        .map((attachment) {
+          final url = ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
+          return AttachmentDownloadStore.get(url);
+        })
+        .whereType<DownloadedAttachment>()
+        .toList();
+  }
+
+  Future<void> _downloadAlbum() async {
     if (_downloading) return;
 
-    if (AttachmentDownloadStore.isDownloaded(_url)) {
-      if (!mounted) return;
-      setState(() {});
+    if (_allDownloaded) {
+      await _showAlbumSaveSheet(context, _downloadedEntries);
       return;
     }
 
+    final attachments = _attachments;
+
     setState(() {
       _downloading = true;
-      _progress = null;
+      _done = 0;
     });
 
     try {
-      await AttachmentDownloadStore.download(
-        url: _url,
-        name: _name,
-        mimeType: _mimeType,
-        onProgress: (progress) {
-          if (!mounted) return;
-          setState(() => _progress = progress.value);
-        },
-      );
+      for (final attachment in attachments) {
+        final url = ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
+        final name = attachment['original_name']?.toString() ?? 'media';
+        final mimeType = attachment['mime_type']?.toString() ?? 'application/octet-stream';
+
+        await AttachmentDownloadStore.download(
+          url: url,
+          name: name,
+          mimeType: mimeType,
+        );
+
+        if (!mounted) return;
+        setState(() => _done++);
+      }
 
       if (!mounted) return;
+
       setState(() => _downloading = false);
+      await _showAlbumSaveSheet(context, _downloadedEntries);
     } catch (_) {
       if (!mounted) return;
 
-      setState(() {
-        _downloading = false;
-        _progress = null;
-      });
+      setState(() => _downloading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось скачать медиа внутри UMe')),
+        const SnackBar(content: Text('Не удалось скачать альбом внутри UMe')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final downloaded = AttachmentDownloadStore.isDownloaded(_url);
+    final total = _attachments.length;
+    final allDownloaded = _allDownloaded;
 
     return Tooltip(
-      message: downloaded ? 'Скачано в UMe' : 'Скачать внутри UMe',
-      child: InkResponse(
-        onTap: _download,
-        radius: 18,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.52),
-            shape: BoxShape.circle,
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              if (_downloading)
-                CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  value: _progress,
+      message: allDownloaded ? 'Сохранить альбом на устройство' : 'Скачать альбом внутри UMe',
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.58),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: _downloadAlbum,
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_downloading)
+                  const SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.3,
+                      color: Colors.white,
+                    ),
+                  ),
+                Icon(
+                  allDownloaded
+                      ? Icons.download_done_rounded
+                      : Icons.file_download_outlined,
                   color: Colors.white,
+                  size: 21,
                 ),
-              Icon(
-                downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
-                color: Colors.white,
-                size: 19,
-              ),
-            ],
+                if (_downloading && total > 0)
+                  Positioned(
+                    bottom: 1,
+                    child: Text(
+                      '$_done/$total',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3455,6 +4190,14 @@ class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> 
     if (_downloading) return;
 
     if (AttachmentDownloadStore.isDownloaded(_url)) {
+      final entry = AttachmentDownloadStore.get(_url);
+      if (entry != null) {
+        await _exportSingleAlbumEntry(
+          context,
+          entry,
+          _attachment['kind']?.toString() ?? 'file',
+        );
+      }
       widget.onDownloaded();
       return;
     }
@@ -3479,6 +4222,14 @@ class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> 
 
       setState(() => _downloading = false);
       widget.onDownloaded();
+      final entry = AttachmentDownloadStore.get(_url);
+      if (entry != null && mounted) {
+        await _exportSingleAlbumEntry(
+          context,
+          entry,
+          _attachment['kind']?.toString() ?? 'file',
+        );
+      }
     } catch (_) {
       if (!mounted) return;
 

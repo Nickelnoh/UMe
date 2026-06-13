@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api_client.dart';
 import '../core/attachment_download_store.dart';
+import '../core/attachment_file_saver.dart';
 
 class VoicePlaybackQueue {
   static List<String> _urls = const [];
@@ -90,10 +91,14 @@ class MessageBubble extends StatelessWidget {
   final String? senderName;
   final bool isMine;
   final String? editedAt;
+  final String? deliveryStatus;
+  final String? forwardedFromName;
+  final bool pinned;
   final List<dynamic> reactions;
   final Color? accentColor;
   final String bubbleStyle;
   final VoidCallback? onLongPress;
+  final VoidCallback? onTap;
 
   const MessageBubble({
     super.key,
@@ -102,10 +107,14 @@ class MessageBubble extends StatelessWidget {
     this.senderName,
     required this.isMine,
     this.editedAt,
+    this.deliveryStatus,
+    this.forwardedFromName,
+    this.pinned = false,
     this.reactions = const [],
     this.accentColor,
     this.bubbleStyle = 'rounded',
     this.onLongPress,
+    this.onTap,
   });
 
   Future<void> _openAttachment(BuildContext context) async {
@@ -158,6 +167,29 @@ class MessageBubble extends StatelessWidget {
     }
   }
 
+  IconData _statusIcon() {
+    switch (deliveryStatus) {
+      case 'read':
+      case 'delivered':
+        return Icons.done_all_rounded;
+      case 'sent':
+      default:
+        return Icons.check_rounded;
+    }
+  }
+
+  String _statusTooltip() {
+    switch (deliveryStatus) {
+      case 'read':
+        return 'Прочитано';
+      case 'delivered':
+        return 'Доставлено';
+      case 'sent':
+      default:
+        return 'Отправлено';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = accentColor ?? Theme.of(context).colorScheme.primary;
@@ -185,6 +217,7 @@ class MessageBubble extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(radius),
+          onTap: onTap,
           onLongPress: onLongPress,
           child: Container(
             constraints: BoxConstraints(
@@ -242,6 +275,56 @@ class MessageBubble extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                       ],
+                      if (forwardedFromName != null &&
+                          forwardedFromName!.trim().isNotEmpty) ...[
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.shortcut_rounded,
+                              size: 14,
+                              color: textColor.withValues(alpha: 0.62),
+                            ),
+                            const SizedBox(width: 4),
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: MediaQuery.of(context).size.width * 0.52,
+                              ),
+                              child: Text(
+                                'Переслано от ${forwardedFromName!}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                      color: textColor.withValues(alpha: 0.66),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                      ],
+                      if (pinned) ...[
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.push_pin_rounded,
+                              size: 14,
+                              color: textColor.withValues(alpha: 0.62),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Закреплено',
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: textColor.withValues(alpha: 0.66),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                      ],
                       if (attachment != null) ...[
                         _AttachmentPreview(
                           attachment: attachment!,
@@ -267,6 +350,19 @@ class MessageBubble extends StatelessWidget {
                               Theme.of(context).textTheme.labelSmall?.copyWith(
                                     color: textColor.withValues(alpha: 0.6),
                                   ),
+                        ),
+                      ],
+                      if (isMine) ...[
+                        const SizedBox(height: 4),
+                        Tooltip(
+                          message: _statusTooltip(),
+                          child: Icon(
+                            _statusIcon(),
+                            size: 16,
+                            color: deliveryStatus == 'read'
+                                ? accent
+                                : textColor.withValues(alpha: 0.58),
+                          ),
                         ),
                       ],
                     ],
@@ -387,6 +483,125 @@ class _ReactionBar extends StatelessWidget {
   }
 }
 
+
+Future<void> _exportDownloadedAttachment(
+  BuildContext context,
+  DownloadedAttachment entry,
+  String successMessage,
+) async {
+  Navigator.of(context).pop();
+
+  final saved = await saveAttachmentBytes(
+    bytes: entry.bytes,
+    name: entry.name,
+    mimeType: entry.mimeType,
+  );
+
+  if (!context.mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        saved
+            ? successMessage
+            : 'На этой платформе доступно только внутреннее скачивание UMe',
+      ),
+    ),
+  );
+}
+
+Future<void> _showAttachmentSaveSheet(
+  BuildContext context,
+  DownloadedAttachment entry, {
+  required String kind,
+}) async {
+  final normalizedKind = kind.toLowerCase();
+  final isMedia = normalizedKind == 'image' || normalizedKind == 'video';
+  final isAudio = normalizedKind == 'audio';
+
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.download_done_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        Text(
+                          'Скачано в UMe · ${AttachmentDownloadStore.formatSize(entry.sizeBytes)}',
+                          style: Theme.of(sheetContext).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isMedia)
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Сохранить в галерею'),
+                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
+                onTap: () => _exportDownloadedAttachment(
+                  sheetContext,
+                  entry,
+                  'Файл передан на сохранение в галерею',
+                ),
+              ),
+            if (isAudio)
+              ListTile(
+                leading: const Icon(Icons.music_note_rounded),
+                title: const Text('Сохранить в музыку'),
+                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
+                onTap: () => _exportDownloadedAttachment(
+                  sheetContext,
+                  entry,
+                  'Аудио передано на сохранение в музыку',
+                ),
+              ),
+            ListTile(
+              leading: const Icon(Icons.folder_copy_outlined),
+              title: const Text('Сохранить в загрузки'),
+              subtitle: const Text('Скачать файл из внутреннего кеша UMe на устройство'),
+              onTap: () => _exportDownloadedAttachment(
+                sheetContext,
+                entry,
+                'Файл передан в загрузки',
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+bool _looksLikeVoiceMessage(String name, String mimeType) {
+  final lowerName = name.toLowerCase().trim();
+  final lowerMime = mimeType.toLowerCase().trim();
+
+  return lowerName.startsWith('voice_') ||
+      lowerName.startsWith('voice-') ||
+      lowerName.contains('/voice') ||
+      (lowerName.endsWith('.wav') && lowerMime.contains('audio'));
+}
+
 class _AttachmentPreview extends StatefulWidget {
   final Map<String, dynamic> attachment;
   final Color textColor;
@@ -449,6 +664,7 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
                       textColor: widget.textColor,
                       url: _url,
                       mimeType: _mimeType,
+                      kind: 'image',
                       onOpen: widget.onOpen,
                     );
                   },
@@ -487,11 +703,16 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
                     url: _url,
                     name: _name,
                     mimeType: _mimeType,
+                    kind: 'image',
                     compact: true,
                     textColor: Colors.white,
                     backgroundColor: Colors.black.withValues(alpha: 0.55),
                     onDownloaded: _refresh,
-                    onOpenDownloaded: widget.onOpen,
+                    onOpenDownloaded: () {
+                      final entry = AttachmentDownloadStore.get(_url);
+                      if (entry == null) return;
+                      _showAttachmentSaveSheet(context, entry, kind: 'image');
+                    },
                   ),
                 ),
             ],
@@ -508,6 +729,7 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
         textColor: widget.textColor,
         url: _url,
         mimeType: _mimeType,
+        kind: 'video',
         onOpen: widget.onOpen,
       );
     }
@@ -535,6 +757,7 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
         textColor: widget.textColor,
         url: _url,
         mimeType: _mimeType,
+        kind: _kind,
         onOpen: widget.onOpen,
       );
     }
@@ -547,6 +770,7 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
         textColor: widget.textColor,
         url: _url,
         mimeType: _mimeType,
+        kind: _kind,
         onOpen: widget.onOpen,
       );
     }
@@ -766,23 +990,30 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
               _isPlaying ? Icons.pause : Icons.play_arrow,
             ),
           ),
-          const SizedBox(width: 6),
-          _AttachmentDownloadButton(
-            url: widget.url,
-            name: widget.name,
-            mimeType: widget.mimeType,
-            compact: true,
-            textColor: widget.textColor,
-            onDownloaded: () {
-              if (!mounted) return;
-              setState(() {
-                _sourceReady = false;
-              });
-              unawaited(_prepareSource());
-            },
-            onOpenDownloaded: () {},
-          ),
           const SizedBox(width: 8),
+          if (!_looksLikeVoiceMessage(widget.name, widget.mimeType)) ...[
+            _AttachmentDownloadButton(
+              url: widget.url,
+              name: widget.name,
+              mimeType: widget.mimeType,
+              kind: 'audio',
+              compact: true,
+              textColor: widget.textColor,
+              onDownloaded: () {
+                if (!mounted) return;
+                setState(() {
+                  _sourceReady = false;
+                });
+                unawaited(_prepareSource());
+              },
+              onOpenDownloaded: () {
+                final entry = AttachmentDownloadStore.get(widget.url);
+                if (entry == null) return;
+                _showAttachmentSaveSheet(context, entry, kind: 'audio');
+              },
+            ),
+            const SizedBox(width: 8),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -826,6 +1057,7 @@ class _FileCard extends StatefulWidget {
   final Color textColor;
   final String url;
   final String mimeType;
+  final String kind;
   final VoidCallback onOpen;
 
   const _FileCard({
@@ -835,6 +1067,7 @@ class _FileCard extends StatefulWidget {
     required this.textColor,
     required this.url,
     required this.mimeType,
+    this.kind = 'other',
     required this.onOpen,
   });
 
@@ -916,9 +1149,14 @@ class _FileCardState extends State<_FileCard> {
               url: widget.url,
               name: widget.name,
               mimeType: widget.mimeType,
+              kind: widget.kind,
               textColor: widget.textColor,
               onDownloaded: _refresh,
-              onOpenDownloaded: widget.onOpen,
+              onOpenDownloaded: () {
+                final entry = AttachmentDownloadStore.get(widget.url);
+                if (entry == null) return;
+                _showAttachmentSaveSheet(context, entry, kind: widget.kind);
+              },
             ),
           ],
         ),
@@ -931,6 +1169,7 @@ class _AttachmentDownloadButton extends StatefulWidget {
   final String url;
   final String name;
   final String mimeType;
+  final String kind;
   final Color textColor;
   final Color? backgroundColor;
   final bool compact;
@@ -941,6 +1180,7 @@ class _AttachmentDownloadButton extends StatefulWidget {
     required this.url,
     required this.name,
     required this.mimeType,
+    this.kind = 'other',
     required this.textColor,
     this.backgroundColor,
     this.compact = false,
@@ -1022,7 +1262,8 @@ class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
   Widget build(BuildContext context) {
     final size = widget.compact ? 38.0 : 42.0;
     final iconSize = widget.compact ? 19.0 : 21.0;
-    final background = widget.backgroundColor ?? widget.textColor.withValues(alpha: 0.10);
+    final background = widget.backgroundColor ?? const Color(0xFF1F2C34);
+    final foreground = widget.backgroundColor == null ? Colors.white : widget.textColor;
 
     return Tooltip(
       message: _downloaded ? 'Открыть скачанное' : 'Скачать внутри UMe',
@@ -1049,12 +1290,12 @@ class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
                   child: CircularProgressIndicator(
                     strokeWidth: 2.4,
                     value: _progress,
-                    color: widget.textColor,
+                    color: foreground,
                   ),
                 ),
               Icon(
                 _downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
-                color: widget.textColor,
+                color: foreground,
                 size: iconSize,
               ),
               if (_downloading && !widget.compact && _label != null)
@@ -1063,7 +1304,7 @@ class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
                   child: Text(
                     _label!,
                     style: TextStyle(
-                      color: widget.textColor,
+                      color: foreground,
                       fontSize: 8,
                       fontWeight: FontWeight.w800,
                     ),
