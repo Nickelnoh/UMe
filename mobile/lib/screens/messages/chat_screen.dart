@@ -14,6 +14,7 @@ import '../../core/websocket_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/top_notification.dart';
 import '../../widgets/internal_file_manager.dart';
+
 // ignore: unused_element
 enum _AttachmentMode {
   media,
@@ -156,7 +157,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-
   Future<void> _loadPresence() async {
     try {
       final result = await ApiClient.get('/chats/${widget.chatId}/presence');
@@ -168,13 +168,14 @@ class _ChatScreenState extends State<ChatScreen> {
         _peerLastSeenAt = result['last_seen_at']?.toString();
       });
     } catch (_) {
-      // Статус не должен ломать открытие чата.
+      // РЎС‚Р°С‚СѓСЃ РЅРµ РґРѕР»Р¶РµРЅ Р»РѕРјР°С‚СЊ РѕС‚РєСЂС‹С‚РёРµ С‡Р°С‚Р°.
     }
   }
 
   Future<void> _loadPinnedMessage() async {
     try {
-      final result = await ApiClient.get('/chats/${widget.chatId}/pinned-message');
+      final result =
+          await ApiClient.get('/chats/${widget.chatId}/pinned-message');
 
       if (!mounted || result is! Map) return;
 
@@ -184,7 +185,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _syncPinnedFlag();
       });
     } catch (_) {
-      // Закреп не должен ломать открытие чата.
+      // Р—Р°РєСЂРµРї РЅРµ РґРѕР»Р¶РµРЅ Р»РѕРјР°С‚СЊ РѕС‚РєСЂС‹С‚РёРµ С‡Р°С‚Р°.
     }
   }
 
@@ -193,7 +194,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _messages = _messages.map((item) {
       final message = Map<String, dynamic>.from(item as Map);
-      message['pinned'] = pinnedId != null && message['id']?.toString() == pinnedId;
+      message['pinned'] =
+          pinnedId != null && message['id']?.toString() == pinnedId;
       return message;
     }).toList();
   }
@@ -205,7 +207,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await ApiClient.post('/messages/delivered', {'message_ids': ids});
     } catch (_) {
-      // Статусы доставки не должны ломать чат.
+      // РЎС‚Р°С‚СѓСЃС‹ РґРѕСЃС‚Р°РІРєРё РЅРµ РґРѕР»Р¶РЅС‹ Р»РѕРјР°С‚СЊ С‡Р°С‚.
     }
   }
 
@@ -213,7 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await ApiClient.post('/chats/${widget.chatId}/messages/read', {});
     } catch (_) {
-      // Статусы прочтения не должны ломать чат.
+      // РЎС‚Р°С‚СѓСЃС‹ РїСЂРѕС‡С‚РµРЅРёСЏ РЅРµ РґРѕР»Р¶РЅС‹ Р»РѕРјР°С‚СЊ С‡Р°С‚.
     }
   }
 
@@ -284,16 +286,17 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Удалить сообщений: ${ids.length}?'),
-          content: const Text('Удалятся только ваши сообщения. Чужие сообщения сервер не удалит.'),
+          title: Text('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёР№: ${ids.length}?'),
+          content: const Text(
+              'РЈРґР°Р»СЏС‚СЃСЏ С‚РѕР»СЊРєРѕ РІР°С€Рё СЃРѕРѕР±С‰РµРЅРёСЏ. Р§СѓР¶РёРµ СЃРѕРѕР±С‰РµРЅРёСЏ СЃРµСЂРІРµСЂ РЅРµ СѓРґР°Р»РёС‚.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Отмена'),
+              child: const Text('РћС‚РјРµРЅР°'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Удалить'),
+              child: const Text('РЈРґР°Р»РёС‚СЊ'),
             ),
           ],
         );
@@ -303,20 +306,25 @@ class _ChatScreenState extends State<ChatScreen> {
     if (confirm != true) return;
 
     try {
-      final result = await ApiClient.post('/messages/delete-batch', {'message_ids': ids});
+      final result =
+          await ApiClient.post('/messages/delete-batch', {'message_ids': ids});
       final deletedIds = result is Map && result['message_ids'] is List
-          ? List<dynamic>.from(result['message_ids'] as List).map((item) => item.toString()).toSet()
+          ? List<dynamic>.from(result['message_ids'] as List)
+              .map((item) => item.toString())
+              .toSet()
           : ids.toSet();
 
       if (!mounted) return;
 
       setState(() {
-        _messages.removeWhere((item) => deletedIds.contains((item as Map)['id']?.toString()));
+        _messages.removeWhere(
+            (item) => deletedIds.contains((item as Map)['id']?.toString()));
         _selectedMessageIds.removeAll(deletedIds);
         _selectionMode = _selectedMessageIds.isNotEmpty;
       });
 
-      TopNotification.success(context, message: 'Удалено: ${deletedIds.length}');
+      TopNotification.success(context,
+          message: 'РЈРґР°Р»РµРЅРѕ: ${deletedIds.length}');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -341,7 +349,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final id = _pinnedMessage?['id']?.toString();
     if (id == null) return;
 
-    final index = _messages.indexWhere((item) => (item as Map)['id']?.toString() == id);
+    final index =
+        _messages.indexWhere((item) => (item as Map)['id']?.toString() == id);
     if (index == -1 || !_scrollController.hasClients) return;
 
     final targetOffset = (index * 92.0).clamp(
@@ -436,17 +445,17 @@ class _ChatScreenState extends State<ChatScreen> {
   String _activityText(String activityType) {
     switch (activityType) {
       case 'typing':
-        return 'печатает';
+        return 'РїРµС‡Р°С‚Р°РµС‚';
       case 'recording_voice':
-        return 'записывает голосовое сообщение';
+        return 'Р·Р°РїРёСЃС‹РІР°РµС‚ РіРѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ';
       case 'sending_audio':
-        return 'отправляет аудио';
+        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ Р°СѓРґРёРѕ';
       case 'sending_video':
-        return 'отправляет видео';
+        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ РІРёРґРµРѕ';
       case 'sending_photo':
-        return 'отправляет фото';
+        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ С„РѕС‚Рѕ';
       case 'sending_file':
-        return 'отправляет файл';
+        return 'РѕС‚РїСЂР°РІР»СЏРµС‚ С„Р°Р№Р»';
       default:
         return '';
     }
@@ -468,31 +477,32 @@ class _ChatScreenState extends State<ChatScreen> {
       return text;
     }
 
-    if (widget.isGroup) return 'группа';
+    if (widget.isGroup) return 'РіСЂСѓРїРїР°';
 
-    if (_peerOnline) return 'в сети';
+    if (_peerOnline) return 'РІ СЃРµС‚Рё';
 
     final lastSeen = _peerLastSeenAt;
     if (lastSeen != null && lastSeen.isNotEmpty) {
-      return 'был(а) в ${_formatLastSeenTime(lastSeen)}';
+      return 'Р±С‹Р»(Р°) РІ ${_formatLastSeenTime(lastSeen)}';
     }
 
-    return 'был(а) недавно';
+    return 'Р±С‹Р»(Р°) РЅРµРґР°РІРЅРѕ';
   }
 
   String _formatLastSeenTime(String value) {
     final parsed = DateTime.tryParse(value);
-    if (parsed == null) return 'недавно';
+    if (parsed == null) return 'РЅРµРґР°РІРЅРѕ';
 
     final local = parsed.toLocal();
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final date = DateTime(local.year, local.month, local.day);
-    final time = '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     final days = today.difference(date).inDays;
 
     if (days == 0) return time;
-    if (days == 1) return 'вчера $time';
+    if (days == 1) return 'РІС‡РµСЂР° $time';
 
     return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')} $time';
   }
@@ -517,7 +527,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
           setState(() {
             _peerOnline = event['online'] == true;
-            _peerLastSeenAt = event['last_seen_at']?.toString() ?? _peerLastSeenAt;
+            _peerLastSeenAt =
+                event['last_seen_at']?.toString() ?? _peerLastSeenAt;
           });
           return;
         }
@@ -585,7 +596,8 @@ class _ChatScreenState extends State<ChatScreen> {
             _selectionMode = _selectedMessageIds.isNotEmpty;
           });
 
-          if (_pinnedMessage != null && ids.contains(_pinnedMessage!['id']?.toString())) {
+          if (_pinnedMessage != null &&
+              ids.contains(_pinnedMessage!['id']?.toString())) {
             setState(() => _pinnedMessage = null);
           }
 
@@ -622,10 +634,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
             TopNotification.message(
               context,
-              title: 'Новое сообщение',
+              title: 'РќРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ',
               message: messageText != null && messageText.isNotEmpty
                   ? messageText
-                  : 'Новое вложение',
+                  : 'РќРѕРІРѕРµ РІР»РѕР¶РµРЅРёРµ',
             );
           }
 
@@ -701,7 +713,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 : <dynamic>[];
 
             reactions.removeWhere(
-              (item) => item is Map && item['user_id']?.toString() == reactionUserId,
+              (item) =>
+                  item is Map && item['user_id']?.toString() == reactionUserId,
             );
 
             reactions.add({
@@ -735,7 +748,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 : <dynamic>[];
 
             reactions.removeWhere(
-              (item) => item is Map && item['user_id']?.toString() == reactionUserId,
+              (item) =>
+                  item is Map && item['user_id']?.toString() == reactionUserId,
             );
 
             message['reactions'] = reactions;
@@ -789,7 +803,6 @@ class _ChatScreenState extends State<ChatScreen> {
     await _sendMessage(text: text);
   }
 
-
   Future<void> _openInternalFileManager() async {
     final pickedFiles = await showModalBottomSheet<List<PickedInternalFile>>(
       context: context,
@@ -829,7 +842,7 @@ class _ChatScreenState extends State<ChatScreen> {
         final attachmentId = uploaded['id']?.toString();
 
         if (attachmentId == null || attachmentId.isEmpty) {
-          throw Exception('Сервер не вернул attachment id');
+          throw Exception('РЎРµСЂРІРµСЂ РЅРµ РІРµСЂРЅСѓР» attachment id');
         }
 
         await _sendMessage(
@@ -851,8 +864,8 @@ class _ChatScreenState extends State<ChatScreen> {
       TopNotification.success(
         context,
         message: sentCount == 1
-            ? 'Файл отправлен'
-            : 'Отправлено файлов: $sentCount',
+            ? 'Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ'
+            : 'РћС‚РїСЂР°РІР»РµРЅРѕ С„Р°Р№Р»РѕРІ: $sentCount',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -878,7 +891,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return files.isEmpty ? null : 'sending_file';
   }
 
-
 // ignore: unused_element
   Future<void> _pickAndSendFiles() async {
     try {
@@ -893,7 +905,8 @@ class _ChatScreenState extends State<ChatScreen> {
       final files = result.files.where((file) => file.bytes != null).toList();
 
       if (files.isEmpty) {
-        _showError('Не удалось прочитать выбранные файлы');
+        _showError(
+            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ С„Р°Р№Р»С‹');
         return;
       }
 
@@ -946,8 +959,8 @@ class _ChatScreenState extends State<ChatScreen> {
         TopNotification.success(
           context,
           message: files.length == 1
-              ? 'Файл отправлен'
-              : 'Файлы отправлены: ${files.length}',
+              ? 'Р¤Р°Р№Р» РѕС‚РїСЂР°РІР»РµРЅ'
+              : 'Р¤Р°Р№Р»С‹ РѕС‚РїСЂР°РІР»РµРЅС‹: ${files.length}',
         );
       }
     } catch (e) {
@@ -968,7 +981,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final hasPermission = await _recorder.hasPermission();
 
       if (!hasPermission) {
-        _showError('Нет доступа к микрофону');
+        _showError('РќРµС‚ РґРѕСЃС‚СѓРїР° Рє РјРёРєСЂРѕС„РѕРЅСѓ');
         return;
       }
 
@@ -1068,7 +1081,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _sendChatActivity('sending_audio');
 
       if (_recordedPcmBytes.isEmpty) {
-        _showError('Голосовое сообщение пустое');
+        _showError('Р“РѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РїСѓСЃС‚РѕРµ');
         return;
       }
 
@@ -1098,7 +1111,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         TopNotification.success(
           context,
-          message: 'Голосовое сообщение отправлено',
+          message: 'Р“РѕР»РѕСЃРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ',
         );
       }
     } catch (e) {
@@ -1143,7 +1156,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.info(
         context,
-        message: 'Запись отменена',
+        message: 'Р—Р°РїРёСЃСЊ РѕС‚РјРµРЅРµРЅР°',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1218,12 +1231,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        'Отправить файлы',
+                        'РћС‚РїСЂР°РІРёС‚СЊ С„Р°Р№Р»С‹',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Выбрано: ${files.length}',
+                        'Р’С‹Р±СЂР°РЅРѕ: ${files.length}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -1232,12 +1245,12 @@ class _ChatScreenState extends State<ChatScreen> {
                           ButtonSegment(
                             value: _AttachmentMode.media,
                             icon: Icon(Icons.perm_media_outlined),
-                            label: Text('Медиа'),
+                            label: Text('РњРµРґРёР°'),
                           ),
                           ButtonSegment(
                             value: _AttachmentMode.file,
                             icon: Icon(Icons.insert_drive_file_outlined),
-                            label: Text('Файлы'),
+                            label: Text('Р¤Р°Р№Р»С‹'),
                           ),
                         ],
                         selected: {mode},
@@ -1253,8 +1266,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         minLines: 1,
                         maxLines: 4,
                         decoration: const InputDecoration(
-                          labelText: 'Подпись',
-                          hintText: 'Подпись добавится к первому файлу',
+                          labelText: 'РџРѕРґРїРёСЃСЊ',
+                          hintText:
+                              'РџРѕРґРїРёСЃСЊ РґРѕР±Р°РІРёС‚СЃСЏ Рє РїРµСЂРІРѕРјСѓ С„Р°Р№Р»Сѓ',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -1290,7 +1304,7 @@ class _ChatScreenState extends State<ChatScreen> {
                               onPressed: () {
                                 Navigator.of(context).pop(null);
                               },
-                              child: const Text('Отмена'),
+                              child: const Text('РћС‚РјРµРЅР°'),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -1305,7 +1319,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                 );
                               },
                               icon: const Icon(Icons.send),
-                              label: const Text('Отправить'),
+                              label: const Text('РћС‚РїСЂР°РІРёС‚СЊ'),
                             ),
                           ),
                         ],
@@ -1383,7 +1397,8 @@ class _ChatScreenState extends State<ChatScreen> {
         message['text'].toString().trim().isNotEmpty;
     final hasMyReaction = _hasMyReaction(message);
     final hasText = message['text']?.toString().trim().isNotEmpty == true;
-    final isPinned = _pinnedMessage?['id']?.toString() == message['id']?.toString();
+    final isPinned =
+        _pinnedMessage?['id']?.toString() == message['id']?.toString();
 
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1395,52 +1410,55 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.add_reaction_outlined),
-                title: const Text('Реакция emoji'),
+                title: const Text('Р РµР°РєС†РёСЏ emoji'),
                 onTap: () => Navigator.of(context).pop('emoji_reaction'),
               ),
               ListTile(
                 leading: const Icon(Icons.image_outlined),
-                title: const Text('Реакция картинкой'),
+                title: const Text('Р РµР°РєС†РёСЏ РєР°СЂС‚РёРЅРєРѕР№'),
                 onTap: () => Navigator.of(context).pop('image_reaction'),
               ),
               if (hasMyReaction)
                 ListTile(
                   leading: const Icon(Icons.close),
-                  title: const Text('Убрать мою реакцию'),
+                  title: const Text('РЈР±СЂР°С‚СЊ РјРѕСЋ СЂРµР°РєС†РёСЋ'),
                   onTap: () => Navigator.of(context).pop('remove_reaction'),
                 ),
               const Divider(height: 1),
               if (hasText)
                 ListTile(
                   leading: const Icon(Icons.copy_rounded),
-                  title: const Text('Копировать текст'),
+                  title: const Text('РљРѕРїРёСЂРѕРІР°С‚СЊ С‚РµРєСЃС‚'),
                   onTap: () => Navigator.of(context).pop('copy'),
                 ),
               ListTile(
                 leading: const Icon(Icons.shortcut_rounded),
-                title: const Text('Переслать'),
+                title: const Text('РџРµСЂРµСЃР»Р°С‚СЊ'),
                 onTap: () => Navigator.of(context).pop('forward'),
               ),
               ListTile(
-                leading: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
-                title: Text(isPinned ? 'Открепить' : 'Закрепить'),
-                onTap: () => Navigator.of(context).pop(isPinned ? 'unpin' : 'pin'),
+                leading:
+                    Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+                title: Text(
+                    isPinned ? 'РћС‚РєСЂРµРїРёС‚СЊ' : 'Р—Р°РєСЂРµРїРёС‚СЊ'),
+                onTap: () =>
+                    Navigator.of(context).pop(isPinned ? 'unpin' : 'pin'),
               ),
               ListTile(
                 leading: const Icon(Icons.checklist_rounded),
-                title: const Text('Выбрать'),
+                title: const Text('Р’С‹Р±СЂР°С‚СЊ'),
                 onTap: () => Navigator.of(context).pop('select'),
               ),
               if (canEdit)
                 ListTile(
                   leading: const Icon(Icons.edit),
-                  title: const Text('Редактировать'),
+                  title: const Text('Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ'),
                   onTap: () => Navigator.of(context).pop('edit'),
                 ),
               if (isMine)
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
-                  title: const Text('Удалить'),
+                  title: const Text('РЈРґР°Р»РёС‚СЊ'),
                   onTap: () => Navigator.of(context).pop('delete'),
                 ),
             ],
@@ -1497,7 +1515,8 @@ class _ChatScreenState extends State<ChatScreen> {
     await Clipboard.setData(ClipboardData(text: text));
 
     if (!mounted) return;
-    TopNotification.success(context, message: 'Текст скопирован');
+    TopNotification.success(context,
+        message: 'РўРµРєСЃС‚ СЃРєРѕРїРёСЂРѕРІР°РЅ');
   }
 
   Future<void> _pinMessage(Map<String, dynamic> message) async {
@@ -1514,11 +1533,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final raw = result is Map ? result['message'] : null;
       setState(() {
-        _pinnedMessage = raw is Map ? Map<String, dynamic>.from(raw) : Map<String, dynamic>.from(message);
+        _pinnedMessage = raw is Map
+            ? Map<String, dynamic>.from(raw)
+            : Map<String, dynamic>.from(message);
         _syncPinnedFlag();
       });
 
-      TopNotification.success(context, message: 'Сообщение закреплено');
+      TopNotification.success(context,
+          message: 'РЎРѕРѕР±С‰РµРЅРёРµ Р·Р°РєСЂРµРїР»РµРЅРѕ');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1526,7 +1548,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _unpinMessage() async {
     try {
-      await ApiClient.post('/chats/${widget.chatId}/pinned-message', {'message_id': null});
+      await ApiClient.post(
+          '/chats/${widget.chatId}/pinned-message', {'message_id': null});
 
       if (!mounted) return;
 
@@ -1535,7 +1558,8 @@ class _ChatScreenState extends State<ChatScreen> {
         _syncPinnedFlag();
       });
 
-      TopNotification.info(context, message: 'Сообщение откреплено');
+      TopNotification.info(context,
+          message: 'РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РєСЂРµРїР»РµРЅРѕ');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1562,7 +1586,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
                     child: Text(
-                      'Переслать в чат',
+                      'РџРµСЂРµСЃР»Р°С‚СЊ РІ С‡Р°С‚',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
@@ -1572,16 +1596,20 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: ListView.builder(
                       itemCount: list.length,
                       itemBuilder: (context, index) {
-                        final chat = Map<String, dynamic>.from(list[index] as Map);
-                        final title = chat['title']?.toString() ?? 'Чат';
+                        final chat =
+                            Map<String, dynamic>.from(list[index] as Map);
+                        final title = chat['title']?.toString() ?? 'Р§Р°С‚';
                         final isGroup = chat['is_group'] == true;
 
                         return ListTile(
                           leading: CircleAvatar(
-                            child: Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded),
+                            child: Icon(isGroup
+                                ? Icons.groups_rounded
+                                : Icons.person_rounded),
                           ),
                           title: Text(title),
-                          subtitle: Text(isGroup ? 'Группа' : 'Личный чат'),
+                          subtitle: Text(
+                              isGroup ? 'Р“СЂСѓРїРїР°' : 'Р›РёС‡РЅС‹Р№ С‡Р°С‚'),
                           onTap: () => Navigator.of(context).pop(chat),
                         );
                       },
@@ -1603,7 +1631,8 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       if (!mounted) return;
-      TopNotification.success(context, message: 'Сообщение переслано');
+      TopNotification.success(context,
+          message: 'РЎРѕРѕР±С‰РµРЅРёРµ РїРµСЂРµСЃР»Р°РЅРѕ');
     } catch (e) {
       _showError(_cleanError(e));
     }
@@ -1621,7 +1650,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickEmojiReaction(Map<String, dynamic> message) async {
     final controller = TextEditingController();
-    const quickEmojis = ['👍', '❤️', '😂', '🔥', '🥰', '😮', '😢', '👏'];
+    const quickEmojis = [
+      'рџ‘Ќ',
+      'вќ¤пёЏ',
+      'рџ‚',
+      'рџ”Ґ',
+      'рџҐ°',
+      'рџ®',
+      'рџў',
+      'рџ‘Џ'
+    ];
 
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1639,7 +1677,7 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Выберите реакцию',
+                  'Р’С‹Р±РµСЂРёС‚Рµ СЂРµР°РєС†РёСЋ',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
@@ -1673,7 +1711,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: controller,
                   autofocus: true,
                   decoration: const InputDecoration(
-                    labelText: 'Любой emoji или символ',
+                    labelText: 'Р›СЋР±РѕР№ emoji РёР»Рё СЃРёРјРІРѕР»',
                     border: OutlineInputBorder(),
                   ),
                   onSubmitted: (value) {
@@ -1688,7 +1726,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     if (text.isNotEmpty) Navigator.of(context).pop(text);
                   },
                   icon: const Icon(Icons.check),
-                  label: const Text('Поставить'),
+                  label: const Text('РџРѕСЃС‚Р°РІРёС‚СЊ'),
                 ),
               ],
             ),
@@ -1742,7 +1780,8 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = file.bytes;
 
       if (bytes == null) {
-        _showError('Не удалось прочитать изображение');
+        _showError(
+            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
         return;
       }
 
@@ -1774,7 +1813,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Реакция-картинка добавлена',
+        message: 'Р РµР°РєС†РёСЏ-РєР°СЂС‚РёРЅРєР° РґРѕР±Р°РІР»РµРЅР°',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1864,7 +1903,7 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Редактировать сообщение'),
+          title: const Text('Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ'),
           content: TextField(
             controller: controller,
             autofocus: true,
@@ -1872,13 +1911,13 @@ class _ChatScreenState extends State<ChatScreen> {
             maxLines: 5,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
-              labelText: 'Текст',
+              labelText: 'РўРµРєСЃС‚',
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Отмена'),
+              child: const Text('РћС‚РјРµРЅР°'),
             ),
             FilledButton(
               onPressed: () {
@@ -1888,7 +1927,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 Navigator.of(context).pop(text);
               },
-              child: const Text('Сохранить'),
+              child: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ'),
             ),
           ],
         );
@@ -1926,7 +1965,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Сообщение изменено',
+        message: 'РЎРѕРѕР±С‰РµРЅРёРµ РёР·РјРµРЅРµРЅРѕ',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -1938,16 +1977,17 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Удалить сообщение?'),
-          content: const Text('Сообщение исчезнет из чата.'),
+          title: const Text('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ?'),
+          content:
+              const Text('РЎРѕРѕР±С‰РµРЅРёРµ РёСЃС‡РµР·РЅРµС‚ РёР· С‡Р°С‚Р°.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Отмена'),
+              child: const Text('РћС‚РјРµРЅР°'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Удалить'),
+              child: const Text('РЈРґР°Р»РёС‚СЊ'),
             ),
           ],
         );
@@ -1970,7 +2010,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Сообщение удалено',
+        message: 'РЎРѕРѕР±С‰РµРЅРёРµ СѓРґР°Р»РµРЅРѕ',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2116,7 +2156,9 @@ class _ChatScreenState extends State<ChatScreen> {
     switch (_chatWallpaper) {
       case 'clean':
         return BoxDecoration(
-          color: isDark ? const Color(0xFF0B141A) : Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: isDark
+              ? const Color(0xFF0B141A)
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
         );
 
       case 'gradient':
@@ -2194,20 +2236,20 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Название группы'),
+          title: const Text('РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹'),
           content: TextField(
             controller: controller,
             autofocus: true,
             maxLength: 120,
             decoration: const InputDecoration(
-              labelText: 'Название',
+              labelText: 'РќР°Р·РІР°РЅРёРµ',
               border: OutlineInputBorder(),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Отмена'),
+              child: const Text('РћС‚РјРµРЅР°'),
             ),
             FilledButton(
               onPressed: () {
@@ -2215,7 +2257,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (text.isEmpty) return;
                 Navigator.of(context).pop(text);
               },
-              child: const Text('Сохранить'),
+              child: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ'),
             ),
           ],
         );
@@ -2238,7 +2280,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Название группы изменено',
+        message: 'РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹ РёР·РјРµРЅРµРЅРѕ',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2259,7 +2301,8 @@ class _ChatScreenState extends State<ChatScreen> {
       final bytes = file.bytes;
 
       if (bytes == null) {
-        _showError('Не удалось прочитать изображение');
+        _showError(
+            'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РёР·РѕР±СЂР°Р¶РµРЅРёРµ');
         return;
       }
 
@@ -2273,7 +2316,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       TopNotification.success(
         context,
-        message: 'Аватар группы обновлён',
+        message: 'РђРІР°С‚Р°СЂ РіСЂСѓРїРїС‹ РѕР±РЅРѕРІР»С‘РЅ',
       );
     } catch (e) {
       _showError(_cleanError(e));
@@ -2293,7 +2336,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (added == true && mounted) {
       TopNotification.success(
         context,
-        message: 'Участники добавлены',
+        message: 'РЈС‡Р°СЃС‚РЅРёРєРё РґРѕР±Р°РІР»РµРЅС‹',
       );
     }
   }
@@ -2303,16 +2346,17 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Выйти из группы?'),
-          content: const Text('Группа исчезнет из списка ваших чатов.'),
+          title: const Text('Р’С‹Р№С‚Рё РёР· РіСЂСѓРїРїС‹?'),
+          content: const Text(
+              'Р“СЂСѓРїРїР° РёСЃС‡РµР·РЅРµС‚ РёР· СЃРїРёСЃРєР° РІР°С€РёС… С‡Р°С‚РѕРІ.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Отмена'),
+              child: const Text('РћС‚РјРµРЅР°'),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Выйти'),
+              child: const Text('Р’С‹Р№С‚Рё'),
             ),
           ],
         );
@@ -2441,14 +2485,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (firstMine != nextMine) return false;
 
     final firstTime = DateTime.tryParse(
-      first['created_at']?.toString() ??
-          first['createdAt']?.toString() ??
-          '',
+      first['created_at']?.toString() ?? first['createdAt']?.toString() ?? '',
     );
     final nextTime = DateTime.tryParse(
-      next['created_at']?.toString() ??
-          next['createdAt']?.toString() ??
-          '',
+      next['created_at']?.toString() ?? next['createdAt']?.toString() ?? '',
     );
 
     if (firstTime == null || nextTime == null) return true;
@@ -2463,12 +2503,18 @@ class _ChatScreenState extends State<ChatScreen> {
     VoicePlaybackQueue.setUrls(_voicePlaybackUrls(messages));
     final accent = _accentColorValue();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final chatBackgroundColor = isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD);
-    final inputBarColor = isDark ? const Color(0xFF1F2C34) : const Color(0xFFF0F0F0);
+    final chatBackgroundColor =
+        isDark ? const Color(0xFF0B141A) : const Color(0xFFECE5DD);
+    final inputBarColor =
+        isDark ? const Color(0xFF1F2C34) : const Color(0xFFF0F0F0);
     final inputFillColor = isDark ? const Color(0xFF2A3942) : Colors.white;
-    final inputTextColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
-    final inputHintColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF9AA0A6);
-    final inputBorderColor = isDark ? const Color(0xFF2A3942) : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5);
+    final inputTextColor =
+        isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final inputHintColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF9AA0A6);
+    final inputBorderColor = isDark
+        ? const Color(0xFF2A3942)
+        : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5);
 
     return Scaffold(
       backgroundColor: chatBackgroundColor,
@@ -2535,18 +2581,18 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             IconButton(
-              tooltip: 'Удалить выбранные',
+              tooltip: 'РЈРґР°Р»РёС‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ',
               onPressed: _deleteSelectedMessages,
               icon: const Icon(Icons.delete_outline_rounded),
             ),
             IconButton(
-              tooltip: 'Отменить выбор',
+              tooltip: 'РћС‚РјРµРЅРёС‚СЊ РІС‹Р±РѕСЂ',
               onPressed: _clearSelection,
               icon: const Icon(Icons.close_rounded),
             ),
           ] else if (widget.isGroup)
             IconButton(
-              tooltip: 'Информация о группе',
+              tooltip: 'РРЅС„РѕСЂРјР°С†РёСЏ Рѕ РіСЂСѓРїРїРµ',
               onPressed: _openGroupInfo,
               icon: const Icon(Icons.more_vert_rounded),
             ),
@@ -2582,7 +2628,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: const [
                               SizedBox(height: 220),
                               Center(
-                                child: Text('Пока нет сообщений'),
+                                child:
+                                    Text('РџРѕРєР° РЅРµС‚ СЃРѕРѕР±С‰РµРЅРёР№'),
                               ),
                             ],
                           )
@@ -2598,7 +2645,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                 return _MediaAlbumBubble(
                                   messages: item.messages,
                                   accentColor: accent,
-                                  onLongPressMessage: (message) async => _handleMessageLongPress(message),
+                                  onLongPressMessage: (message) async =>
+                                      _handleMessageLongPress(message),
                                 );
                               }
 
@@ -2619,19 +2667,25 @@ class _ChatScreenState extends State<ChatScreen> {
                                       : Map<String, dynamic>.from(
                                           message['attachment'] as Map,
                                         ),
-                                  senderName: message['sender_name']?.toString(),
+                                  senderName:
+                                      message['sender_name']?.toString(),
                                   isMine: message['is_mine'] == true,
                                   editedAt: message['edited_at']?.toString(),
-                                  deliveryStatus: message['delivery_status']?.toString(),
-                                  forwardedFromName: message['forwarded_from_name']?.toString(),
+                                  deliveryStatus:
+                                      message['delivery_status']?.toString(),
+                                  forwardedFromName:
+                                      message['forwarded_from_name']
+                                          ?.toString(),
                                   pinned: message['pinned'] == true,
                                   reactions: message['reactions'] is List
-                                      ? List<dynamic>.from(message['reactions'] as List)
+                                      ? List<dynamic>.from(
+                                          message['reactions'] as List)
                                       : const [],
                                   accentColor: accent,
                                   bubbleStyle: _bubbleStyle,
                                   onTap: () => _handleMessageTap(message),
-                                  onLongPress: () => _handleMessageLongPress(message),
+                                  onLongPress: () =>
+                                      _handleMessageLongPress(message),
                                 ),
                               );
                             },
@@ -2668,7 +2722,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     Row(
                       children: [
                         IconButton(
-                          tooltip: 'Прикрепить файлы',
+                          tooltip: 'РџСЂРёРєСЂРµРїРёС‚СЊ С„Р°Р№Р»С‹',
                           onPressed: _sending || _recording
                               ? null
                               : _openInternalFileManager,
@@ -2690,9 +2744,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             decoration: InputDecoration(
                               hintText: _recording
                                   ? (_recordLocked
-                                      ? 'Автозапись идёт'
-                                      : 'Потяните вверх для автозаписи')
-                                  : 'Сообщение',
+                                      ? 'РђРІС‚РѕР·Р°РїРёСЃСЊ РёРґС‘С‚'
+                                      : 'РџРѕС‚СЏРЅРёС‚Рµ РІРІРµСЂС… РґР»СЏ Р°РІС‚РѕР·Р°РїРёСЃРё')
+                                  : 'РЎРѕРѕР±С‰РµРЅРёРµ',
                               filled: true,
                               fillColor: inputFillColor,
                               hintStyle: TextStyle(color: inputHintColor),
@@ -2726,7 +2780,8 @@ class _ChatScreenState extends State<ChatScreen> {
                             disabled: _sending,
                             onTap: _handleMicTap,
                             onLongPressStart: _handleMicLongPressStart,
-                            onLongPressMoveUpdate: _handleMicLongPressMoveUpdate,
+                            onLongPressMoveUpdate:
+                                _handleMicLongPressMoveUpdate,
                             onLongPressEnd: _handleMicLongPressEnd,
                           ),
                       ],
@@ -2741,7 +2796,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
-
 
 class _PinnedMessageBar extends StatelessWidget {
   final Map<String, dynamic> message;
@@ -2764,8 +2818,8 @@ class _PinnedMessageBar extends StatelessWidget {
     final subtitle = text != null && text.isNotEmpty
         ? text
         : attachment is Map
-            ? attachment['original_name']?.toString() ?? 'Вложение'
-            : 'Сообщение';
+            ? attachment['original_name']?.toString() ?? 'Р’Р»РѕР¶РµРЅРёРµ'
+            : 'РЎРѕРѕР±С‰РµРЅРёРµ';
 
     return Material(
       color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
@@ -2792,8 +2846,8 @@ class _PinnedMessageBar extends StatelessWidget {
                   children: [
                     Text(
                       forwarded != null && forwarded.isNotEmpty
-                          ? 'Закреплено · переслано от $forwarded'
-                          : 'Закреплённое сообщение',
+                          ? 'Р—Р°РєСЂРµРїР»РµРЅРѕ В· РїРµСЂРµСЃР»Р°РЅРѕ РѕС‚ $forwarded'
+                          : 'Р—Р°РєСЂРµРїР»С‘РЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -2812,7 +2866,7 @@ class _PinnedMessageBar extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: 'Открепить',
+                tooltip: 'РћС‚РєСЂРµРїРёС‚СЊ',
                 onPressed: onUnpin,
                 icon: const Icon(Icons.close_rounded),
               ),
@@ -2823,7 +2877,6 @@ class _PinnedMessageBar extends StatelessWidget {
     );
   }
 }
-
 
 class _VoiceRecordingPanel extends StatelessWidget {
   final Color accent;
@@ -2851,8 +2904,10 @@ class _VoiceRecordingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final panelColor = isDark ? const Color(0xFF1F2C34) : const Color(0xFFE8F5E9);
-    final textColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final panelColor =
+        isDark ? const Color(0xFF1F2C34) : const Color(0xFFE8F5E9);
+    final textColor =
+        isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
     final subColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF5F6368);
     final progress = lockProgress.clamp(0.0, 1.0);
 
@@ -2864,7 +2919,8 @@ class _VoiceRecordingPanel extends StatelessWidget {
         color: panelColor,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: accent.withValues(alpha: locked ? 0.40 : 0.18 + progress * 0.22),
+          color:
+              accent.withValues(alpha: locked ? 0.40 : 0.18 + progress * 0.22),
         ),
       ),
       child: Row(
@@ -2874,7 +2930,9 @@ class _VoiceRecordingPanel extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: locked ? accent : Color.lerp(Colors.redAccent, accent, progress),
+              color: locked
+                  ? accent
+                  : Color.lerp(Colors.redAccent, accent, progress),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -2890,7 +2948,9 @@ class _VoiceRecordingPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  locked ? 'Автозапись включена' : 'Идёт запись голосового',
+                  locked
+                      ? 'РђРІС‚РѕР·Р°РїРёСЃСЊ РІРєР»СЋС‡РµРЅР°'
+                      : 'РРґС‘С‚ Р·Р°РїРёСЃСЊ РіРѕР»РѕСЃРѕРІРѕРіРѕ',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2901,8 +2961,8 @@ class _VoiceRecordingPanel extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   locked
-                      ? '${_elapsedText()} · нажмите микрофон, чтобы отправить'
-                      : '${_elapsedText()} · отпустите для отправки или потяните вверх',
+                      ? '${_elapsedText()} В· РЅР°Р¶РјРёС‚Рµ РјРёРєСЂРѕС„РѕРЅ, С‡С‚РѕР±С‹ РѕС‚РїСЂР°РІРёС‚СЊ'
+                      : '${_elapsedText()} В· РѕС‚РїСѓСЃС‚РёС‚Рµ РґР»СЏ РѕС‚РїСЂР°РІРєРё РёР»Рё РїРѕС‚СЏРЅРёС‚Рµ РІРІРµСЂС…',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2916,13 +2976,13 @@ class _VoiceRecordingPanel extends StatelessWidget {
           ),
           if (!locked)
             IconButton(
-              tooltip: 'Закрепить запись',
+              tooltip: 'Р—Р°РєСЂРµРїРёС‚СЊ Р·Р°РїРёСЃСЊ',
               onPressed: onLock,
               color: accent,
               icon: const Icon(Icons.lock_open_rounded),
             ),
           IconButton(
-            tooltip: 'Отменить запись',
+            tooltip: 'РћС‚РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊ',
             onPressed: onCancel,
             color: Colors.redAccent,
             icon: const Icon(Icons.delete_outline_rounded),
@@ -3012,7 +3072,7 @@ class _HoldToRecordButton extends StatelessWidget {
 
     return SizedBox(
       width: 58,
-      height: 96,
+      height: recording && !locked ? 96 : 48,
       child: Stack(
         clipBehavior: Clip.none,
         alignment: Alignment.bottomCenter,
@@ -3039,7 +3099,9 @@ class _HoldToRecordButton extends StatelessWidget {
                     ],
                   ),
                   child: Icon(
-                    progress >= 0.88 ? Icons.lock_rounded : Icons.keyboard_arrow_up_rounded,
+                    progress >= 0.88
+                        ? Icons.lock_rounded
+                        : Icons.keyboard_arrow_up_rounded,
                     color: Colors.white,
                     size: 25,
                   ),
@@ -3142,12 +3204,13 @@ class _GroupInfoSheet extends StatelessWidget {
                           title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                  ),
                         ),
                         Text(
-                          'Групповой чат',
+                          'Р“СЂСѓРїРїРѕРІРѕР№ С‡Р°С‚',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -3163,23 +3226,23 @@ class _GroupInfoSheet extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onRename,
                     icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Название'),
+                    label: const Text('РќР°Р·РІР°РЅРёРµ'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onPickAvatar,
                     icon: const Icon(Icons.image_outlined),
-                    label: const Text('Аватар'),
+                    label: const Text('РђРІР°С‚Р°СЂ'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onAddMembers,
                     icon: const Icon(Icons.person_add_alt_1_outlined),
-                    label: const Text('Добавить'),
+                    label: const Text('Р”РѕР±Р°РІРёС‚СЊ'),
                   ),
                 ],
               ),
               const SizedBox(height: 14),
               Text(
-                'Участники',
+                'РЈС‡Р°СЃС‚РЅРёРєРё',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
@@ -3194,14 +3257,18 @@ class _GroupInfoSheet extends StatelessWidget {
                     final members = snapshot.data ?? [];
 
                     if (members.isEmpty) {
-                      return const Center(child: Text('Участники не найдены'));
+                      return const Center(
+                          child:
+                              Text('РЈС‡Р°СЃС‚РЅРёРєРё РЅРµ РЅР°Р№РґРµРЅС‹'));
                     }
 
                     return ListView.builder(
                       itemCount: members.length,
                       itemBuilder: (context, index) {
-                        final member = Map<String, dynamic>.from(members[index] as Map);
-                        final name = member['name']?.toString() ?? 'Пользователь';
+                        final member =
+                            Map<String, dynamic>.from(members[index] as Map);
+                        final name = member['name']?.toString() ??
+                            'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ';
                         final username = member['username']?.toString() ?? '';
                         final avatarUrl = member['avatar_url']?.toString();
                         final role = member['role']?.toString() ?? 'member';
@@ -3210,16 +3277,18 @@ class _GroupInfoSheet extends StatelessWidget {
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: accent.withValues(alpha: 0.16),
-                              backgroundImage: avatarUrl == null || avatarUrl.isEmpty
-                                  ? null
-                                  : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
+                              backgroundImage:
+                                  avatarUrl == null || avatarUrl.isEmpty
+                                      ? null
+                                      : NetworkImage(
+                                          ApiClient.absoluteUrl(avatarUrl)),
                               child: avatarUrl == null || avatarUrl.isEmpty
                                   ? Text(name.characters.first.toUpperCase())
                                   : null,
                             ),
                             title: Text(name),
                             subtitle: Text(
-                              username.isEmpty ? role : '@$username · $role',
+                              username.isEmpty ? role : '@$username В· $role',
                             ),
                           ),
                         );
@@ -3232,7 +3301,7 @@ class _GroupInfoSheet extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: onLeave,
                 icon: const Icon(Icons.logout),
-                label: const Text('Выйти из группы'),
+                label: const Text('Р’С‹Р№С‚Рё РёР· РіСЂСѓРїРїС‹'),
               ),
             ],
           ),
@@ -3307,7 +3376,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
     final nickname = user['nickname']?.toString().trim();
     if (nickname != null && nickname.isNotEmpty) return nickname;
 
-    return user['username']?.toString() ?? 'Пользователь';
+    return user['username']?.toString() ?? 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ';
   }
 
   void _toggle(Map<String, dynamic> user) {
@@ -3361,7 +3430,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Добавить участников',
+                      'Р”РѕР±Р°РІРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -3373,7 +3442,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text('Добавить (${_selected.length})'),
+                        : Text('Р”РѕР±Р°РІРёС‚СЊ (${_selected.length})'),
                   ),
                 ],
               ),
@@ -3383,7 +3452,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                 enabled: !_saving,
                 onChanged: _onChanged,
                 decoration: InputDecoration(
-                  labelText: 'Найти пользователей',
+                  labelText: 'РќР°Р№С‚Рё РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№',
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _searching
                       ? const Padding(
@@ -3404,14 +3473,15 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                     ? Center(
                         child: Text(
                           _queryController.text.trim().length < 2
-                              ? 'Введите минимум 2 символа'
-                              : 'Ничего не найдено',
+                              ? 'Р’РІРµРґРёС‚Рµ РјРёРЅРёРјСѓРј 2 СЃРёРјРІРѕР»Р°'
+                              : 'РќРёС‡РµРіРѕ РЅРµ РЅР°Р№РґРµРЅРѕ',
                         ),
                       )
                     : ListView.builder(
                         itemCount: _results.length,
                         itemBuilder: (context, index) {
-                          final user = Map<String, dynamic>.from(_results[index] as Map);
+                          final user =
+                              Map<String, dynamic>.from(_results[index] as Map);
                           final id = user['id']?.toString() ?? '';
                           final selected = _selected.containsKey(id);
                           final name = _title(user);
@@ -3422,17 +3492,22 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
                             child: ListTile(
                               onTap: _saving ? null : () => _toggle(user),
                               leading: CircleAvatar(
-                                backgroundImage: avatarUrl == null || avatarUrl.isEmpty
-                                    ? null
-                                    : NetworkImage(ApiClient.absoluteUrl(avatarUrl)),
+                                backgroundImage:
+                                    avatarUrl == null || avatarUrl.isEmpty
+                                        ? null
+                                        : NetworkImage(
+                                            ApiClient.absoluteUrl(avatarUrl)),
                                 child: avatarUrl == null || avatarUrl.isEmpty
                                     ? Text(name.characters.first.toUpperCase())
                                     : null,
                               ),
                               title: Text(name),
-                              subtitle: username.isEmpty ? null : Text('@$username'),
+                              subtitle:
+                                  username.isEmpty ? null : Text('@$username'),
                               trailing: Icon(
-                                selected ? Icons.check_circle : Icons.add_circle_outline,
+                                selected
+                                    ? Icons.check_circle
+                                    : Icons.add_circle_outline,
                                 color: selected ? accent : null,
                               ),
                             ),
@@ -3495,7 +3570,8 @@ class _MediaAlbumBubble extends StatelessWidget {
         : isDark
             ? const Color(0xFF202C33)
             : Colors.white;
-    final textColor = isDark && !isMine ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final textColor =
+        isDark && !isMine ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
     final caption = messages
         .map((message) => message['text']?.toString().trim() ?? '')
         .where((text) => text.isNotEmpty)
@@ -3699,7 +3775,6 @@ class _AlbumGrid extends StatelessWidget {
                     size: 48,
                   ),
                 ),
-
               if (overlayText != null)
                 Container(
                   color: Colors.black.withValues(alpha: 0.56),
@@ -3765,7 +3840,8 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
             onPageChanged: (value) => setState(() => _index = value),
             itemBuilder: (context, index) {
               final message = widget.messages[index];
-              final attachment = Map<String, dynamic>.from(message['attachment'] as Map);
+              final attachment =
+                  Map<String, dynamic>.from(message['attachment'] as Map);
               final kind = attachment['kind']?.toString();
               final rawUrl = attachment['url']?.toString() ?? '';
               final url = ApiClient.absoluteUrl(rawUrl);
@@ -3792,7 +3868,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Видео',
+                      'Р’РёРґРµРѕ',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
@@ -3810,7 +3886,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                         mode: LaunchMode.externalApplication,
                       ),
                       icon: const Icon(Icons.open_in_new_rounded),
-                      label: const Text('Открыть видео'),
+                      label: const Text('РћС‚РєСЂС‹С‚СЊ РІРёРґРµРѕ'),
                     ),
                   ],
                 ),
@@ -3829,7 +3905,7 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
                   ),
                   Expanded(
                     child: Text(
-                      '${_index + 1} из ${widget.messages.length}',
+                      '${_index + 1} РёР· ${widget.messages.length}',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white,
@@ -3854,7 +3930,6 @@ class _AlbumViewerDialogState extends State<_AlbumViewerDialog> {
     );
   }
 }
-
 
 Future<void> _exportAlbumEntries(
   BuildContext context,
@@ -3881,8 +3956,8 @@ Future<void> _exportAlbumEntries(
     SnackBar(
       content: Text(
         savedCount > 0
-            ? '$successMessage · $savedCount шт.'
-            : 'На этой платформе доступно только внутреннее скачивание UMe',
+            ? '$successMessage В· $savedCount С€С‚.'
+            : 'РќР° СЌС‚РѕР№ РїР»Р°С‚С„РѕСЂРјРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РІРЅСѓС‚СЂРµРЅРЅРµРµ СЃРєР°С‡РёРІР°РЅРёРµ UMe',
       ),
     ),
   );
@@ -3910,7 +3985,7 @@ Future<void> _showAlbumSaveSheet(
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Альбом скачан в UMe · ${entries.length} медиа',
+                      'РђР»СЊР±РѕРј СЃРєР°С‡Р°РЅ РІ UMe В· ${entries.length} РјРµРґРёР°',
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                   ),
@@ -3919,22 +3994,25 @@ Future<void> _showAlbumSaveSheet(
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Сохранить альбом в галерею'),
-              subtitle: const Text('В браузере файлы сохраняются через системные загрузки'),
+              title: const Text(
+                  'РЎРѕС…СЂР°РЅРёС‚СЊ Р°Р»СЊР±РѕРј РІ РіР°Р»РµСЂРµСЋ'),
+              subtitle: const Text(
+                  'Р’ Р±СЂР°СѓР·РµСЂРµ С„Р°Р№Р»С‹ СЃРѕС…СЂР°РЅСЏСЋС‚СЃСЏ С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅС‹Рµ Р·Р°РіСЂСѓР·РєРё'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 entries,
-                'Альбом передан на сохранение в галерею',
+                'РђР»СЊР±РѕРј РїРµСЂРµРґР°РЅ РЅР° СЃРѕС…СЂР°РЅРµРЅРёРµ РІ РіР°Р»РµСЂРµСЋ',
               ),
             ),
             ListTile(
               leading: const Icon(Icons.folder_copy_outlined),
-              title: const Text('Сохранить в загрузки'),
-              subtitle: const Text('Скачать медиа из внутреннего кеша UMe на устройство'),
+              title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ Р·Р°РіСЂСѓР·РєРё'),
+              subtitle: const Text(
+                  'РЎРєР°С‡Р°С‚СЊ РјРµРґРёР° РёР· РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РєРµС€Р° UMe РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 entries,
-                'Альбом передан в загрузки',
+                'РђР»СЊР±РѕРј РїРµСЂРµРґР°РЅ РІ Р·Р°РіСЂСѓР·РєРё',
               ),
             ),
           ],
@@ -3979,22 +4057,24 @@ Future<void> _exportSingleAlbumEntry(
             if (isMedia)
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Сохранить в галерею'),
-                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
+                title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ РіР°Р»РµСЂРµСЋ'),
+                subtitle: const Text(
+                    'Р’ Р±СЂР°СѓР·РµСЂРµ С„Р°Р№Р» СЃРѕС…СЂР°РЅРёС‚СЃСЏ С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅСѓСЋ Р·Р°РіСЂСѓР·РєСѓ'),
                 onTap: () => _exportAlbumEntries(
                   sheetContext,
                   [entry],
-                  'Файл передан на сохранение в галерею',
+                  'Р¤Р°Р№Р» РїРµСЂРµРґР°РЅ РЅР° СЃРѕС…СЂР°РЅРµРЅРёРµ РІ РіР°Р»РµСЂРµСЋ',
                 ),
               ),
             ListTile(
               leading: const Icon(Icons.folder_copy_outlined),
-              title: const Text('Сохранить в загрузки'),
-              subtitle: const Text('Скачать файл из внутреннего кеша UMe на устройство'),
+              title: const Text('РЎРѕС…СЂР°РЅРёС‚СЊ РІ Р·Р°РіСЂСѓР·РєРё'),
+              subtitle: const Text(
+                  'РЎРєР°С‡Р°С‚СЊ С„Р°Р№Р» РёР· РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РєРµС€Р° UMe РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'),
               onTap: () => _exportAlbumEntries(
                 sheetContext,
                 [entry],
-                'Файл передан в загрузки',
+                'Р¤Р°Р№Р» РїРµСЂРµРґР°РЅ РІ Р·Р°РіСЂСѓР·РєРё',
               ),
             ),
           ],
@@ -4003,7 +4083,6 @@ Future<void> _exportSingleAlbumEntry(
     },
   );
 }
-
 
 class _AlbumSaveButton extends StatefulWidget {
   final List<Map<String, dynamic>> messages;
@@ -4028,13 +4107,12 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
         .whereType<Map>()
         .map((raw) => Map<String, dynamic>.from(raw))
         .where((attachment) {
-          final kind = attachment['kind']?.toString();
-          final url = attachment['url']?.toString();
-          return (kind == 'image' || kind == 'video') &&
-              url != null &&
-              url.trim().isNotEmpty;
-        })
-        .toList();
+      final kind = attachment['kind']?.toString();
+      final url = attachment['url']?.toString();
+      return (kind == 'image' || kind == 'video') &&
+          url != null &&
+          url.trim().isNotEmpty;
+    }).toList();
   }
 
   bool get _allDownloaded {
@@ -4050,7 +4128,8 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
   List<DownloadedAttachment> get _downloadedEntries {
     return _attachments
         .map((attachment) {
-          final url = ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
+          final url =
+              ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
           return AttachmentDownloadStore.get(url);
         })
         .whereType<DownloadedAttachment>()
@@ -4076,7 +4155,8 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
       for (final attachment in attachments) {
         final url = ApiClient.absoluteUrl(attachment['url']?.toString() ?? '');
         final name = attachment['original_name']?.toString() ?? 'media';
-        final mimeType = attachment['mime_type']?.toString() ?? 'application/octet-stream';
+        final mimeType =
+            attachment['mime_type']?.toString() ?? 'application/octet-stream';
 
         await AttachmentDownloadStore.download(
           url: url,
@@ -4098,7 +4178,9 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
       setState(() => _downloading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось скачать альбом внутри UMe')),
+        const SnackBar(
+            content: Text(
+                'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ Р°Р»СЊР±РѕРј РІРЅСѓС‚СЂРё UMe')),
       );
     }
   }
@@ -4109,7 +4191,9 @@ class _AlbumSaveButtonState extends State<_AlbumSaveButton> {
     final allDownloaded = _allDownloaded;
 
     return Tooltip(
-      message: allDownloaded ? 'Сохранить альбом на устройство' : 'Скачать альбом внутри UMe',
+      message: allDownloaded
+          ? 'РЎРѕС…СЂР°РЅРёС‚СЊ Р°Р»СЊР±РѕРј РЅР° СѓСЃС‚СЂРѕР№СЃС‚РІРѕ'
+          : 'РЎРєР°С‡Р°С‚СЊ Р°Р»СЊР±РѕРј РІРЅСѓС‚СЂРё UMe',
       child: Material(
         color: Colors.black.withValues(alpha: 0.58),
         shape: const CircleBorder(),
@@ -4171,20 +4255,25 @@ class _AlbumViewerDownloadButton extends StatefulWidget {
   });
 
   @override
-  State<_AlbumViewerDownloadButton> createState() => _AlbumViewerDownloadButtonState();
+  State<_AlbumViewerDownloadButton> createState() =>
+      _AlbumViewerDownloadButtonState();
 }
 
-class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> {
+class _AlbumViewerDownloadButtonState
+    extends State<_AlbumViewerDownloadButton> {
   bool _downloading = false;
   double? _progress;
 
-  Map<String, dynamic> get _attachment => Map<String, dynamic>.from(widget.message['attachment'] as Map);
+  Map<String, dynamic> get _attachment =>
+      Map<String, dynamic>.from(widget.message['attachment'] as Map);
 
-  String get _url => ApiClient.absoluteUrl(_attachment['url']?.toString() ?? '');
+  String get _url =>
+      ApiClient.absoluteUrl(_attachment['url']?.toString() ?? '');
 
   String get _name => _attachment['original_name']?.toString() ?? 'media';
 
-  String get _mimeType => _attachment['mime_type']?.toString() ?? 'application/octet-stream';
+  String get _mimeType =>
+      _attachment['mime_type']?.toString() ?? 'application/octet-stream';
 
   Future<void> _download() async {
     if (_downloading) return;
@@ -4239,7 +4328,9 @@ class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> 
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось скачать медиа внутри UMe')),
+        const SnackBar(
+            content: Text(
+                'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ РјРµРґРёР° РІРЅСѓС‚СЂРё UMe')),
       );
     }
   }
@@ -4249,7 +4340,9 @@ class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> 
     final downloaded = AttachmentDownloadStore.isDownloaded(_url);
 
     return IconButton(
-      tooltip: downloaded ? 'Скачано в UMe' : 'Скачать внутри UMe',
+      tooltip: downloaded
+          ? 'РЎРєР°С‡Р°РЅРѕ РІ UMe'
+          : 'РЎРєР°С‡Р°С‚СЊ РІРЅСѓС‚СЂРё UMe',
       onPressed: _download,
       color: Colors.white,
       icon: Stack(
@@ -4266,7 +4359,9 @@ class _AlbumViewerDownloadButtonState extends State<_AlbumViewerDownloadButton> 
               ),
             ),
           Icon(
-            downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
+            downloaded
+                ? Icons.download_done_rounded
+                : Icons.arrow_downward_rounded,
           ),
         ],
       ),
