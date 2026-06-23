@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../core/api_client.dart';
 import '../../core/onesignal_service.dart';
+import '../../core/notification_sound_service.dart';
 import '../../core/secure_storage.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/top_notification.dart';
@@ -48,6 +49,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _init() async {
+    await NotificationSoundService.init();
     await _loadMe();
     await _loadAll();
     await _connectWebSocket();
@@ -134,6 +136,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
             final title = _chatTitleById(event['chat_id']?.toString());
             final text = message['text']?.toString().trim();
 
+            unawaited(NotificationSoundService.playMessageSound());
+
             TopNotification.message(
               context,
               title: title.isNotEmpty ? title : 'Новое сообщение',
@@ -165,6 +169,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
               request['requester_name']?.toString().trim().isNotEmpty == true
                   ? request['requester_name'].toString()
                   : request['requester_username']?.toString() ?? 'Пользователь';
+
+          unawaited(NotificationSoundService.playMessageSound());
 
           TopNotification.message(
             context,

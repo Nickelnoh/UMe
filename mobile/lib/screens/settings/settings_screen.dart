@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../core/api_client.dart';
+import '../../core/notification_sound_service.dart';
 import '../../widgets/top_notification.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -15,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _saving = false;
+  bool _notificationSoundEnabled = true;
 
   String _username = '';
   String _nickname = '';
@@ -32,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _loadNotificationSound();
     _loadMe();
   }
 
@@ -40,6 +43,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _nicknameController.dispose();
     _displayNameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNotificationSound() async {
+    await NotificationSoundService.init();
+
+    if (!mounted) return;
+
+    setState(() {
+      _notificationSoundEnabled = NotificationSoundService.enabled;
+    });
+  }
+
+  Future<void> _toggleNotificationSound(bool value) async {
+    setState(() => _notificationSoundEnabled = value);
+
+    await NotificationSoundService.setEnabled(value);
+
+    if (!mounted) return;
+
+    if (value) {
+      await NotificationSoundService.testSound();
+
+      if (!mounted) return;
+
+      TopNotification.success(
+        context,
+        message: 'Звук уведомлений включён',
+      );
+    } else {
+      TopNotification.info(
+        context,
+        message: 'Звук уведомлений выключен',
+      );
+    }
+  }
+
+  Future<void> _testNotificationSound() async {
+    await NotificationSoundService.testSound();
+
+    if (!mounted) return;
+
+    TopNotification.info(
+      context,
+      message: 'Проверка звука уведомления',
+    );
   }
 
   Future<void> _loadMe() async {
@@ -245,7 +293,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     var text = e.toString();
     text = text.replaceFirst('Exception: ', '');
 
-    if (text.contains('Failed to fetch')) return 'Не удалось подключиться к серверу';
+    if (text.contains('Failed to fetch')) {
+      return 'Не удалось подключиться к серверу';
+    }
     if (text.contains('TimeoutException')) return 'Сервер не ответил вовремя';
     if (text.contains('Nickname already exists')) return 'Никнейм уже занят';
 
@@ -347,7 +397,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             _ProfileTile(
                               avatarUrl: avatar,
-                              name: _displayName.isNotEmpty ? _displayName : _nickname,
+                              name: _displayName.isNotEmpty
+                                  ? _displayName
+                                  : _nickname,
                               username: _username,
                               accent: accent,
                               onAvatarTap: _saving ? null : _pickAvatar,
@@ -404,9 +456,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _SettingsInfoTile(
                               icon: Icons.notifications_none_rounded,
                               title: 'Уведомления',
-                              subtitle: 'Push включается на главном экране',
+                              subtitle: _notificationSoundEnabled
+                                  ? 'Push и звук уведомлений'
+                                  : 'Push включается на главном экране, звук выключен',
                               accent: accent,
                             ),
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              secondary: Icon(
+                                _notificationSoundEnabled
+                                    ? Icons.volume_up_rounded
+                                    : Icons.volume_off_rounded,
+                                color: accent,
+                              ),
+                              title: const Text(
+                                'Звук уведомлений',
+                                style: TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                              subtitle: Text(
+                                _notificationSoundEnabled
+                                    ? 'Проигрывать звук при новых сообщениях'
+                                    : 'Не проигрывать звук при новых сообщениях',
+                              ),
+                              value: _notificationSoundEnabled,
+                              onChanged:
+                                  _saving ? null : _toggleNotificationSound,
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: _notificationSoundEnabled && !_saving
+                                  ? _testNotificationSound
+                                  : null,
+                              icon: const Icon(Icons.play_arrow_rounded),
+                              label: const Text('Проверить звук'),
+                            ),
+                            const SizedBox(height: 8),
                             _SettingsInfoTile(
                               icon: Icons.lock_outline_rounded,
                               title: 'Приватность',
@@ -431,7 +515,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   color: accent,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isDark ? Colors.white24 : Colors.black12,
+                                    color: isDark
+                                        ? Colors.white24
+                                        : Colors.black12,
                                   ),
                                 ),
                               ),
@@ -454,7 +540,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 'soft': 'Мягкий',
                                 'compact': 'Компакт',
                               },
-                              onChanged: (value) => _saveChatAppearance(bubbleStyle: value),
+                              onChanged: (value) =>
+                                  _saveChatAppearance(bubbleStyle: value),
                             ),
                             const SizedBox(height: 18),
                             _SettingsInfoTile(
@@ -470,7 +557,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: 'default',
                               selected: _chatWallpaper == 'default',
                               accent: accent,
-                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'default'),
+                              onTap: _saving
+                                  ? null
+                                  : () => _saveChatAppearance(
+                                      chatWallpaper: 'default'),
                             ),
                             _WallpaperOptionTile(
                               title: 'Чистый',
@@ -478,7 +568,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: 'clean',
                               selected: _chatWallpaper == 'clean',
                               accent: accent,
-                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'clean'),
+                              onTap: _saving
+                                  ? null
+                                  : () => _saveChatAppearance(
+                                      chatWallpaper: 'clean'),
                             ),
                             _WallpaperOptionTile(
                               title: 'Градиент',
@@ -486,7 +579,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: 'gradient',
                               selected: _chatWallpaper == 'gradient',
                               accent: accent,
-                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'gradient'),
+                              onTap: _saving
+                                  ? null
+                                  : () => _saveChatAppearance(
+                                      chatWallpaper: 'gradient'),
                             ),
                             _WallpaperOptionTile(
                               title: 'Ночь',
@@ -494,7 +590,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: 'night',
                               selected: _chatWallpaper == 'night',
                               accent: accent,
-                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'night'),
+                              onTap: _saving
+                                  ? null
+                                  : () => _saveChatAppearance(
+                                      chatWallpaper: 'night'),
                             ),
                             _WallpaperOptionTile(
                               title: 'Мята',
@@ -502,14 +601,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: 'mint',
                               selected: _chatWallpaper == 'mint',
                               accent: accent,
-                              onTap: _saving ? null : () => _saveChatAppearance(chatWallpaper: 'mint'),
+                              onTap: _saving
+                                  ? null
+                                  : () => _saveChatAppearance(
+                                      chatWallpaper: 'mint'),
                             ),
                             const SizedBox(height: 8),
                             OutlinedButton.icon(
-                              onPressed: _saving ? null : _pickChatWallpaperImage,
-                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              onPressed:
+                                  _saving ? null : _pickChatWallpaperImage,
+                              icon: const Icon(
+                                  Icons.add_photo_alternate_outlined),
                               label: Text(
-                                _isCustomWallpaper ? 'Заменить свою картинку' : 'Поставить свою картинку',
+                                _isCustomWallpaper
+                                    ? 'Заменить свою картинку'
+                                    : 'Поставить свою картинку',
                               ),
                             ),
                           ],
@@ -544,7 +650,10 @@ class _OldWhatsSettingsHeader extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [accent, HSLColor.fromColor(accent).withLightness(0.40).toColor()],
+          colors: [
+            accent,
+            HSLColor.fromColor(accent).withLightness(0.40).toColor()
+          ],
         ),
       ),
       child: SafeArea(
@@ -658,12 +767,14 @@ class _ProfileTile extends StatelessWidget {
               CircleAvatar(
                 radius: 34,
                 backgroundColor: accent.withValues(alpha: 0.16),
-                backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl!),
+                backgroundImage:
+                    avatarUrl == null ? null : NetworkImage(avatarUrl!),
                 foregroundColor: accent,
                 child: avatarUrl == null
                     ? Text(
                         title.characters.first.toUpperCase(),
-                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                        style: const TextStyle(
+                            fontSize: 28, fontWeight: FontWeight.w900),
                       )
                     : null,
               ),
@@ -689,7 +800,8 @@ class _ProfileTile extends StatelessWidget {
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
               ),
               if (username.isNotEmpty)
                 Text(
@@ -697,7 +809,10 @@ class _ProfileTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.62),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -747,13 +862,15 @@ class _SettingsInfoTile extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+                        color:
+                            theme.colorScheme.onSurface.withValues(alpha: 0.58),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -845,7 +962,9 @@ class _WallpaperOptionTile extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: selected ? accent.withValues(alpha: 0.11) : theme.colorScheme.surface,
+            color: selected
+                ? accent.withValues(alpha: 0.11)
+                : theme.colorScheme.surface,
             borderRadius: BorderRadius.circular(9),
             border: Border.all(
               color: selected ? accent : theme.dividerColor,
@@ -861,21 +980,22 @@ class _WallpaperOptionTile extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15.5),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 15.5),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+                        color:
+                            theme.colorScheme.onSurface.withValues(alpha: 0.58),
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
               ),
-              if (selected)
-                Icon(Icons.check_circle_rounded, color: accent),
+              if (selected) Icon(Icons.check_circle_rounded, color: accent),
             ],
           ),
         ),
@@ -941,7 +1061,11 @@ class _WallpaperMiniPreview extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [accent.withValues(alpha: 0.42), Colors.white, accent.withValues(alpha: 0.18)],
+            colors: [
+              accent.withValues(alpha: 0.42),
+              Colors.white,
+              accent.withValues(alpha: 0.18)
+            ],
           ),
         );
       case 'night':
@@ -976,7 +1100,8 @@ class _AccentColorPickerSheet extends StatefulWidget {
   const _AccentColorPickerSheet({required this.initialColor});
 
   @override
-  State<_AccentColorPickerSheet> createState() => _AccentColorPickerSheetState();
+  State<_AccentColorPickerSheet> createState() =>
+      _AccentColorPickerSheetState();
 }
 
 class _AccentColorPickerSheetState extends State<_AccentColorPickerSheet> {
@@ -1003,7 +1128,8 @@ class _AccentColorPickerSheetState extends State<_AccentColorPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
-    final textColor = _color.computeLuminance() > 0.55 ? Colors.black : Colors.white;
+    final textColor =
+        _color.computeLuminance() > 0.55 ? Colors.black : Colors.white;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(18, 8, 18, bottom + 18),
@@ -1015,7 +1141,10 @@ class _AccentColorPickerSheetState extends State<_AccentColorPickerSheet> {
           children: [
             Text(
               'Акцентный цвет',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 14),
             AnimatedContainer(
@@ -1037,7 +1166,9 @@ class _AccentColorPickerSheetState extends State<_AccentColorPickerSheet> {
                       children: [
                         Text(
                           'Будущий цвет',
-                          style: TextStyle(color: textColor.withValues(alpha: 0.82), fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                              color: textColor.withValues(alpha: 0.82),
+                              fontWeight: FontWeight.w700),
                         ),
                         Text(
                           _hex(_color),
@@ -1128,7 +1259,9 @@ class _ColorSlider extends StatelessWidget {
               child: Text(label, style: Theme.of(context).textTheme.labelLarge),
             ),
             Text(
-              max == 360 ? value.round().toString() : '${(value * 100).round()}%',
+              max == 360
+                  ? value.round().toString()
+                  : '${(value * 100).round()}%',
               style: Theme.of(context).textTheme.labelMedium,
             ),
           ],

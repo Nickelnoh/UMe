@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_client.dart';
 import '../../core/attachment_download_store.dart';
 import '../../core/attachment_file_saver.dart';
+import '../../core/notification_sound_service.dart';
 import '../../core/websocket_service.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/top_notification.dart';
@@ -89,6 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _init() async {
+    await NotificationSoundService.init();
     await _loadMe();
     await _loadPresence();
     await _loadMessages();
@@ -631,6 +633,8 @@ class _ChatScreenState extends State<ChatScreen> {
             unawaited(_markChatRead());
 
             final messageText = message['text']?.toString().trim();
+
+            unawaited(NotificationSoundService.playMessageSound());
 
             TopNotification.message(
               context,
