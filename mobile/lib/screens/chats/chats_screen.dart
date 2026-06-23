@@ -137,15 +137,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
             TopNotification.message(
               context,
               title: title.isNotEmpty ? title : 'Новое сообщение',
-              message: text != null && text.isNotEmpty
-                  ? text
-                  : 'Новое вложение',
+              message:
+                  text != null && text.isNotEmpty ? text : 'Новое вложение',
             );
           }
           return;
         }
 
-        if (type == 'message.updated' || type == 'message.deleted' || type == 'messages.deleted') {
+        if (type == 'message.updated' ||
+            type == 'message.deleted' ||
+            type == 'messages.deleted') {
           await _loadChats(silent: true);
           return;
         }
@@ -401,46 +402,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   Future<void> _contactDeveloper() async {
-    final controller = TextEditingController();
-
-    final message = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Связь с разработчиком'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: 3,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              hintText: 'Опишите проблему или предложение',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
-              child: const Text('Открыть чат'),
-            ),
-          ],
-        );
-      },
-    );
-
-    controller.dispose();
-
-    if (message == null) return;
-
     try {
-      final result = await ApiClient.post(
-        '/support/developer-chat',
-        {'message': message.trim().isEmpty ? null : message.trim()},
-      );
+      final result = await ApiClient.post('/support/developer-chat', {});
 
       if (!mounted) return;
 
@@ -456,14 +419,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
       final chatId = chat['id']?.toString();
       final title = chat['title']?.toString() ?? 'Разработчик';
+      final isGroup = chat['is_group'] == true;
 
       if (chatId != null && chatId.isNotEmpty) {
-        _openChat(chatId, title);
+        _openChat(chatId, title, isGroup: isGroup);
       }
     } catch (e) {
       var error = _cleanError(e);
       if (error.contains('Developer contact is not configured')) {
-        error = 'Контакт разработчика не настроен на сервере. Укажи DEVELOPER_USERNAME или DEVELOPER_USER_ID в .env';
+        error =
+            'Контакт разработчика не настроен на сервере. Укажи DEVELOPER_USERNAME или DEVELOPER_USER_ID в .env';
       }
       _showError(error);
     }
@@ -804,7 +769,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
         final green = accent;
         final list = _visibleChats();
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final pageColor = isDark ? const Color(0xFF0B141A) : const Color(0xFFF7F7F7);
+        final pageColor =
+            isDark ? const Color(0xFF0B141A) : const Color(0xFFF7F7F7);
 
         return Scaffold(
           backgroundColor: pageColor,
@@ -818,7 +784,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 selectedTab: _selectedTab,
                 onMenu: _openMobileSideMenu,
                 onChats: () => setState(() => _selectedTab = _ChatsTab.chats),
-                onRequests: () => setState(() => _selectedTab = _ChatsTab.requests),
+                onRequests: () =>
+                    setState(() => _selectedTab = _ChatsTab.requests),
                 onGroups: () => setState(() => _selectedTab = _ChatsTab.groups),
               ),
               Expanded(
@@ -855,13 +822,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   )
                                 else
                                   ...list.map((item) {
-                                    final chat = Map<String, dynamic>.from(item as Map);
+                                    final chat =
+                                        Map<String, dynamic>.from(item as Map);
                                     final chatId = chat['id']?.toString() ?? '';
-                                    final title = chat['title']?.toString() ?? 'Чат';
-                                    final avatarUrl = chat['avatar_url']?.toString();
+                                    final title =
+                                        chat['title']?.toString() ?? 'Чат';
+                                    final avatarUrl =
+                                        chat['avatar_url']?.toString();
                                     final isGroup = chat['is_group'] == true;
                                     final time = _formatChatTime(
-                                      chat['last_message_created_at']?.toString(),
+                                      chat['last_message_created_at']
+                                          ?.toString(),
                                     );
                                     final subtitle = _chatSubtitle(chat);
 
@@ -874,7 +845,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                       isGroup: isGroup,
                                       onTap: () {
                                         if (chatId.isEmpty) return;
-                                        _openChat(chatId, title, isGroup: isGroup);
+                                        _openChat(chatId, title,
+                                            isGroup: isGroup);
                                       },
                                       onLongPress: () => _confirmDeleteChat(
                                         chatId,
@@ -908,17 +880,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
   String _chatSubtitle(Map<String, dynamic> chat) {
     final lastMessage = chat['last_message_text']?.toString().trim();
     final lastType = chat['last_message_type']?.toString();
-    final lastSender = chat['last_message_sender_name']?.toString().trim().isNotEmpty == true
-        ? chat['last_message_sender_name'].toString().trim()
-        : chat['last_sender_name']?.toString().trim().isNotEmpty == true
-            ? chat['last_sender_name'].toString().trim()
-            : chat['sender_name']?.toString().trim();
+    final lastSender =
+        chat['last_message_sender_name']?.toString().trim().isNotEmpty == true
+            ? chat['last_message_sender_name'].toString().trim()
+            : chat['last_sender_name']?.toString().trim().isNotEmpty == true
+                ? chat['last_sender_name'].toString().trim()
+                : chat['sender_name']?.toString().trim();
 
     final base = lastMessage != null && lastMessage.isNotEmpty
         ? lastMessage
         : _fallbackLastMessage(lastType);
 
-    if (chat['is_group'] == true && lastSender != null && lastSender.isNotEmpty) {
+    if (chat['is_group'] == true &&
+        lastSender != null &&
+        lastSender.isNotEmpty) {
       return '$lastSender: $base';
     }
 
@@ -1099,9 +1074,12 @@ class _WhatsTab extends StatelessWidget {
                 if (badge > 0) ...[
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color: active ? Colors.white : Colors.white.withValues(alpha: 0.22),
+                      color: active
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -1155,7 +1133,8 @@ class _RequestsTabBody extends StatelessWidget {
 
     if (!hasAny) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
-      final emptyTextColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+      final emptyTextColor =
+          isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
 
       return ListView(
         children: [
@@ -1181,7 +1160,8 @@ class _RequestsTabBody extends StatelessWidget {
           ...incomingRequests.map((item) {
             final request = Map<String, dynamic>.from(item as Map);
             final requestId = request['id']?.toString() ?? '';
-            final name = request['requester_name']?.toString() ?? 'Пользователь';
+            final name =
+                request['requester_name']?.toString() ?? 'Пользователь';
             final username = request['requester_username']?.toString() ?? '';
             final avatarUrl = request['requester_avatar_url']?.toString();
 
@@ -1207,7 +1187,9 @@ class _RequestsTabBody extends StatelessWidget {
             return _RequestListTile(
               green: green,
               name: name,
-              username: username.isEmpty ? 'ожидает ответа' : '@$username · ожидает ответа',
+              username: username.isEmpty
+                  ? 'ожидает ответа'
+                  : '@$username · ожидает ответа',
               avatarUrl: avatarUrl,
               onCancel: requestId.isEmpty ? null : () => onCancel(requestId),
             );
@@ -1266,12 +1248,16 @@ class _RequestListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
+    final normalizedAvatar =
+        avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tileColor = isDark ? const Color(0xFF111B21) : Colors.white;
-    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
-    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
-    final dividerColor = isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
+    final titleColor =
+        isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+    final dividerColor =
+        isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
 
     return Material(
       color: tileColor,
@@ -1287,7 +1273,9 @@ class _RequestListTile extends StatelessWidget {
                   : NetworkImage(ApiClient.absoluteUrl(normalizedAvatar)),
               child: normalizedAvatar == null
                   ? Text(
-                      name.isNotEmpty ? name.characters.first.toUpperCase() : '?',
+                      name.isNotEmpty
+                          ? name.characters.first.toUpperCase()
+                          : '?',
                       style: TextStyle(
                         color: green,
                         fontWeight: FontWeight.w900,
@@ -1381,13 +1369,18 @@ class _WhatsChatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalizedAvatar = avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
+    final normalizedAvatar =
+        avatarUrl == null || avatarUrl!.trim().isEmpty ? null : avatarUrl;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tileColor = isDark ? const Color(0xFF111B21) : Colors.white;
-    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
-    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
-    final dividerColor = isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
-    final mutedIconColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF8A8F94);
+    final titleColor =
+        isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+    final dividerColor =
+        isDark ? const Color(0xFF222D34) : const Color(0xFFEAEAEA);
+    final mutedIconColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF8A8F94);
 
     return Material(
       color: tileColor,
@@ -1408,7 +1401,9 @@ class _WhatsChatTile extends StatelessWidget {
                     ? isGroup
                         ? Icon(Icons.groups_rounded, color: green)
                         : Text(
-                            title.isNotEmpty ? title.characters.first.toUpperCase() : '?',
+                            title.isNotEmpty
+                                ? title.characters.first.toUpperCase()
+                                : '?',
                             style: TextStyle(
                               color: green,
                               fontSize: 18,
@@ -1445,7 +1440,9 @@ class _WhatsChatTile extends StatelessWidget {
                             Row(
                               children: [
                                 Icon(
-                                  isGroup ? Icons.groups_2_rounded : Icons.done_all_rounded,
+                                  isGroup
+                                      ? Icons.groups_2_rounded
+                                      : Icons.done_all_rounded,
                                   color: mutedIconColor,
                                   size: 17,
                                 ),
@@ -1503,8 +1500,10 @@ class _WhatsEmptyChats extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleColor = isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
-    final subtitleColor = isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
+    final titleColor =
+        isDark ? const Color(0xFFE9EDEF) : const Color(0xFF111111);
+    final subtitleColor =
+        isDark ? const Color(0xFF8696A0) : const Color(0xFF6F7479);
 
     return SizedBox(
       height: 430,
@@ -1586,8 +1585,10 @@ class _MobileSideMenu extends StatelessWidget {
     final width = MediaQuery.of(context).size.width;
     final panelWidth = width < 430 ? width * 0.82 : 330.0;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final panelColor = isDark ? const Color(0xFF111B21) : const Color(0xFFF8F8F8);
-    final footerColor = isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.42);
+    final panelColor =
+        isDark ? const Color(0xFF111B21) : const Color(0xFFF8F8F8);
+    final footerColor =
+        isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.42);
 
     return Container(
       width: panelWidth,
@@ -1774,7 +1775,8 @@ class _MobileSideMenuItem extends StatelessWidget {
         : isDark
             ? const Color(0xFF8696A0)
             : const Color(0xFF6F7479);
-    final arrowColor = isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.25);
+    final arrowColor =
+        isDark ? const Color(0xFF8696A0) : Colors.black.withValues(alpha: 0.25);
 
     return Material(
       color: Colors.transparent,
@@ -2033,18 +2035,20 @@ class _UserSearchSheetState extends State<_UserSearchSheet> {
                             _results[index] as Map,
                           );
 
-                          final title =
-                              user['display_name']?.toString().trim().isNotEmpty ==
+                          final title = user['display_name']
+                                      ?.toString()
+                                      .trim()
+                                      .isNotEmpty ==
+                                  true
+                              ? user['display_name'].toString()
+                              : user['nickname']
+                                          ?.toString()
+                                          .trim()
+                                          .isNotEmpty ==
                                       true
-                                  ? user['display_name'].toString()
-                                  : user['nickname']
-                                              ?.toString()
-                                              .trim()
-                                              .isNotEmpty ==
-                                          true
-                                      ? user['nickname'].toString()
-                                      : user['username']?.toString() ??
-                                          'Пользователь';
+                                  ? user['nickname'].toString()
+                                  : user['username']?.toString() ??
+                                      'Пользователь';
 
                           final username = user['username']?.toString() ?? '';
                           final avatarUrl = user['avatar_url']?.toString();
@@ -2052,7 +2056,8 @@ class _UserSearchSheetState extends State<_UserSearchSheet> {
                           return Card(
                             child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: widget.accent.withValues(alpha: 0.16),
+                                backgroundColor:
+                                    widget.accent.withValues(alpha: 0.16),
                                 backgroundImage:
                                     avatarUrl == null || avatarUrl.isEmpty
                                         ? null
@@ -2080,9 +2085,10 @@ class _UserSearchSheetState extends State<_UserSearchSheet> {
                                     _sending ? null : () => _sendRequest(user),
                                 style: FilledButton.styleFrom(
                                   backgroundColor: widget.accent,
-                                  foregroundColor: widget.accent.computeLuminance() > 0.55
-                                      ? Colors.black
-                                      : Colors.white,
+                                  foregroundColor:
+                                      widget.accent.computeLuminance() > 0.55
+                                          ? Colors.black
+                                          : Colors.white,
                                 ),
                                 child: const Text('Запрос'),
                               ),
@@ -2098,4 +2104,3 @@ class _UserSearchSheetState extends State<_UserSearchSheet> {
     );
   }
 }
-

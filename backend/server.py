@@ -44,6 +44,9 @@ ONESIGNAL_APP_ID = os.getenv("ONESIGNAL_APP_ID")
 ONESIGNAL_REST_API_KEY = os.getenv("ONESIGNAL_REST_API_KEY")
 ONESIGNAL_API_URL = "https://api.onesignal.com/notifications"
 
+DEVELOPER_USER_ID = os.getenv("DEVELOPER_USER_ID")
+DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME")
+
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is required in .env")
@@ -152,6 +155,10 @@ class ChatAppearanceIn(BaseModel):
 
 class DirectChatCreateIn(BaseModel):
     user_id: str
+
+
+class SupportDeveloperChatIn(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=5000)
 
 
 class GroupChatCreateIn(BaseModel):
@@ -1732,6 +1739,167 @@ async def create_direct_chat(
         "already_exists": False,
         "created_at": current_time.isoformat(),
     }
+
+
+
+@app.post("/support/developer-chat")
+async def open_developer_chat(
+    data: SupportDeveloperChatIn,
+    user_id: str = Depends(get_current_user_id),
+):
+    developer_user_id = clean_text(DEVELOPER_USER_ID)
+    developer_username = clean_text(DEVELOPER_USERNAME)
+
+    if not developer_user_id and not developer_username:
+        raise HTTPException(
+            status_code=500,
+            detail="Developer contact is not configured",
+        )
+
+    current_time = now()
+
+    async with db_pool.acquire() as conn:
+        if developer_user_id:
+            developer = await conn.fetchrow(
+                """
+                SELECT id, username, nickname, display_name
+                FROM public.users
+                WHERE id = $1
+                  AND is_active = true
+                """,
+                developer_user_id,
+            )
+        else:
+            developer = await conn.fetchrow(
+                """
+                SELECT id, username, nickname, display_name
+                FROM public.users
+                WHERE lower(username) = lower($1)
+                  AND is_active = true
+                """,
+                developer_username,
+            )
+
+        if not developer:
+            raise HTTPException(status_code=404, detail="Developer user not found")
+
+        other_user_id = developer["id"]
+
+        if other_user_id == user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Developer chat cannot be opened with yourself",
+            )
+
+        title = user_display_name(developer)
+
+        existing_chat = await conn.fetchrow(
+            """
+            SELECT c.id
+            FROM public.chats c
+            JOIN public.chat_members cm1 ON cm1.chat_id = c.id
+            JOIN public.chat_members cm2 ON cm2.chat_id = c.id
+            WHERE c.is_group = false
+              AND cm1.user_id = $1
+              AND cm2.user_id = $2
+            LIMIT 1
+            """,
+            user_id,
+            other_user_id,
+        )
+
+        already_exists = existing_chat is not None
+        chat_id = existing_chat["id"] if existing_chat else make_id()
+
+        async with conn.transaction():
+            if already_exists:
+                await conn.execute(
+                    """
+                    UPDATE public.chat_members
+                    SET hidden = false,
+                        left_at = NULL
+                    WHERE chat_id = $1
+                      AND user_id = ANY($2::text[])
+                    """,
+                    chat_id,
+                    [user_id, other_user_id],
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE public.chats
+                    SET updated_at = $1
+                    WHERE id = $2
+                    """,
+                    current_time,
+                    chat_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO public.chats (
+                        id,
+                        title,
+                        is_group,
+                        created_by_user_id,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES ($1, $2, false, $3, $4, $4)
+                    """,
+                    chat_id,
+                    title,
+                    user_id,
+                    current_time,
+                )
+
+                await conn.execute(
+                    """
+                    INSERT INTO public.chat_members (
+                        id,
+                        chat_id,
+                        user_id,
+                        joined_at,
+                        pinned,
+                        hidden
+                    )
+                    VALUES
+                        ($1, $2, $3, $5, false, false),
+                        ($4, $2, $6, $5, false, false)
+                    """,
+                    make_id(),
+                    chat_id,
+                    user_id,
+                    make_id(),
+                    current_time,
+                    other_user_id,
+                )
+
+    chat_payload = {
+        "id": chat_id,
+        "title": title,
+        "is_group": False,
+        "already_exists": already_exists,
+        "created_at": current_time.isoformat(),
+    }
+
+    await manager.send_to_user(
+        other_user_id,
+        {
+            "type": "chat.created",
+            "chat": chat_payload,
+        },
+    )
+
+    await manager.send_to_user(
+        user_id,
+        {
+            "type": "chat.created",
+            "chat": chat_payload,
+        },
+    )
+
+    return {"chat": chat_payload}
 
 
 @app.post("/chats/group")
