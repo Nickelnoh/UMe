@@ -181,6 +181,7 @@ class ChatRequestCreateIn(BaseModel):
 class MessageCreateIn(BaseModel):
     text: Optional[str] = Field(default=None, max_length=5000)
     attachment_id: Optional[str] = None
+    reply_to_message_id: Optional[str] = None
 
 
 class MessageEditIn(BaseModel):
@@ -337,6 +338,38 @@ def format_attachment(row) -> Optional[dict]:
     }
 
 
+def format_reply_message(row, current_user_id: Optional[str] = None) -> Optional[dict]:
+    data = dict(row)
+
+    if not data.get("reply_message_id"):
+        return None
+
+    attachment = None
+
+    if data.get("reply_attachment_id"):
+        attachment = {
+            "id": data.get("reply_attachment_id"),
+            "url": attachment_url(data.get("reply_attachment_storage_key")),
+            "storage_key": data.get("reply_attachment_storage_key"),
+            "original_name": data.get("reply_attachment_original_name"),
+            "mime_type": data.get("reply_attachment_mime_type"),
+            "size_bytes": data.get("reply_attachment_size_bytes"),
+            "kind": data.get("reply_attachment_kind"),
+        }
+
+    return {
+        "id": data.get("reply_message_id"),
+        "sender_user_id": data.get("reply_sender_user_id"),
+        "sender_name": data.get("reply_display_name")
+        or data.get("reply_nickname")
+        or data.get("reply_username"),
+        "text": data.get("reply_text"),
+        "message_type": data.get("reply_message_type"),
+        "attachment": attachment,
+        "is_mine": data.get("reply_sender_user_id") == current_user_id,
+    }
+
+
 def format_reaction_attachment(row) -> Optional[dict]:
     if not row["reaction_attachment_id"]:
         return None
@@ -443,6 +476,8 @@ def format_message_row(
         "text": data.get("text"),
         "message_type": data.get("message_type"),
         "attachment": format_attachment(row),
+        "reply_to_message_id": data.get("reply_to_message_id"),
+        "reply_to_message": format_reply_message(row, current_user_id),
         "reactions": (reactions_by_message or {}).get(message_id, []),
         "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
         "edited_at": data["edited_at"].isoformat() if data.get("edited_at") else None,
@@ -473,6 +508,7 @@ async def fetch_message_payloads(
             m.message_type,
             m.created_at,
             m.edited_at,
+            m.reply_to_message_id,
             m.forwarded_from_message_id,
             m.forwarded_from_user_id,
 
@@ -490,6 +526,20 @@ async def fetch_message_payloads(
             a.mime_type AS attachment_mime_type,
             a.size_bytes AS attachment_size_bytes,
             a.kind AS attachment_kind,
+
+            rm.id AS reply_message_id,
+            rm.sender_user_id AS reply_sender_user_id,
+            rm.text AS reply_text,
+            rm.message_type AS reply_message_type,
+            ru.username AS reply_username,
+            ru.nickname AS reply_nickname,
+            ru.display_name AS reply_display_name,
+            ra.id AS reply_attachment_id,
+            ra.storage_key AS reply_attachment_storage_key,
+            ra.original_name AS reply_attachment_original_name,
+            ra.mime_type AS reply_attachment_mime_type,
+            ra.size_bytes AS reply_attachment_size_bytes,
+            ra.kind AS reply_attachment_kind,
 
             (m.id = c.pinned_message_id) AS pinned,
 
@@ -520,6 +570,14 @@ async def fetch_message_payloads(
           ON fu.id = m.forwarded_from_user_id
         LEFT JOIN public.attachments a
           ON a.message_id = m.id
+        LEFT JOIN public.messages rm
+          ON rm.id = m.reply_to_message_id
+         AND rm.chat_id = m.chat_id
+         AND rm.deleted_at IS NULL
+        LEFT JOIN public.users ru
+          ON ru.id = rm.sender_user_id
+        LEFT JOIN public.attachments ra
+          ON ra.message_id = rm.id
         WHERE m.id = ANY($1::text[])
           AND m.deleted_at IS NULL
         ORDER BY m.created_at ASC
@@ -718,6 +776,13 @@ async def startup():
             """
             ALTER TABLE public.messages
             ADD COLUMN IF NOT EXISTS forwarded_from_user_id TEXT
+            """
+        )
+
+        await conn.execute(
+            """
+            ALTER TABLE public.messages
+            ADD COLUMN IF NOT EXISTS reply_to_message_id TEXT
             """
         )
 
@@ -3039,6 +3104,7 @@ async def list_messages(
                 m.message_type,
                 m.created_at,
                 m.edited_at,
+                m.reply_to_message_id,
                 m.forwarded_from_message_id,
                 m.forwarded_from_user_id,
 
@@ -3056,6 +3122,20 @@ async def list_messages(
                 a.mime_type AS attachment_mime_type,
                 a.size_bytes AS attachment_size_bytes,
                 a.kind AS attachment_kind,
+
+                rm.id AS reply_message_id,
+                rm.sender_user_id AS reply_sender_user_id,
+                rm.text AS reply_text,
+                rm.message_type AS reply_message_type,
+                ru.username AS reply_username,
+                ru.nickname AS reply_nickname,
+                ru.display_name AS reply_display_name,
+                ra.id AS reply_attachment_id,
+                ra.storage_key AS reply_attachment_storage_key,
+                ra.original_name AS reply_attachment_original_name,
+                ra.mime_type AS reply_attachment_mime_type,
+                ra.size_bytes AS reply_attachment_size_bytes,
+                ra.kind AS reply_attachment_kind,
 
                 (m.id = c.pinned_message_id) AS pinned,
 
@@ -3086,6 +3166,14 @@ async def list_messages(
               ON fu.id = m.forwarded_from_user_id
             LEFT JOIN public.attachments a
               ON a.message_id = m.id
+            LEFT JOIN public.messages rm
+              ON rm.id = m.reply_to_message_id
+             AND rm.chat_id = m.chat_id
+             AND rm.deleted_at IS NULL
+            LEFT JOIN public.users ru
+              ON ru.id = rm.sender_user_id
+            LEFT JOIN public.attachments ra
+              ON ra.message_id = rm.id
             WHERE m.chat_id = $1
               AND m.deleted_at IS NULL
             ORDER BY m.created_at ASC
@@ -3244,6 +3332,7 @@ async def send_message(
 ):
     text = clean_text(data.text)
     attachment_id = clean_text(data.attachment_id)
+    reply_to_message_id = clean_text(data.reply_to_message_id)
 
     if not text and not attachment_id:
         raise HTTPException(status_code=400, detail="Message text or attachment required")
@@ -3294,6 +3383,43 @@ async def send_message(
                     "kind": attachment_row["kind"],
                 }
 
+            reply_to_message = None
+
+            if reply_to_message_id:
+                reply_row = await conn.fetchrow(
+                    """
+                    SELECT
+                        rm.id AS reply_message_id,
+                        rm.sender_user_id AS reply_sender_user_id,
+                        rm.text AS reply_text,
+                        rm.message_type AS reply_message_type,
+                        ru.username AS reply_username,
+                        ru.nickname AS reply_nickname,
+                        ru.display_name AS reply_display_name,
+                        ra.id AS reply_attachment_id,
+                        ra.storage_key AS reply_attachment_storage_key,
+                        ra.original_name AS reply_attachment_original_name,
+                        ra.mime_type AS reply_attachment_mime_type,
+                        ra.size_bytes AS reply_attachment_size_bytes,
+                        ra.kind AS reply_attachment_kind
+                    FROM public.messages rm
+                    JOIN public.users ru
+                      ON ru.id = rm.sender_user_id
+                    LEFT JOIN public.attachments ra
+                      ON ra.message_id = rm.id
+                    WHERE rm.id = $1
+                      AND rm.chat_id = $2
+                      AND rm.deleted_at IS NULL
+                    """,
+                    reply_to_message_id,
+                    chat_id,
+                )
+
+                if not reply_row:
+                    raise HTTPException(status_code=404, detail="Reply message not found")
+
+                reply_to_message = format_reply_message(reply_row, user_id)
+
             await conn.execute(
                 """
                 INSERT INTO public.messages (
@@ -3302,17 +3428,19 @@ async def send_message(
                     sender_user_id,
                     text,
                     message_type,
+                    reply_to_message_id,
                     created_at,
                     edited_at,
                     deleted_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL)
                 """,
                 message_id,
                 chat_id,
                 user_id,
                 text,
                 message_type,
+                reply_to_message_id,
                 current_time,
             )
 
@@ -3357,6 +3485,8 @@ async def send_message(
         "text": text,
         "message_type": message_type,
         "attachment": attachment,
+        "reply_to_message_id": reply_to_message_id,
+        "reply_to_message": reply_to_message,
         "reactions": [],
         "created_at": current_time.isoformat(),
         "edited_at": None,
@@ -3447,6 +3577,7 @@ async def edit_message(
                 m.message_type,
                 m.created_at,
                 m.edited_at,
+                m.reply_to_message_id,
 
                 u.username,
                 u.nickname,
@@ -3457,12 +3588,34 @@ async def edit_message(
                 a.original_name AS attachment_original_name,
                 a.mime_type AS attachment_mime_type,
                 a.size_bytes AS attachment_size_bytes,
-                a.kind AS attachment_kind
+                a.kind AS attachment_kind,
+
+                rm.id AS reply_message_id,
+                rm.sender_user_id AS reply_sender_user_id,
+                rm.text AS reply_text,
+                rm.message_type AS reply_message_type,
+                ru.username AS reply_username,
+                ru.nickname AS reply_nickname,
+                ru.display_name AS reply_display_name,
+                ra.id AS reply_attachment_id,
+                ra.storage_key AS reply_attachment_storage_key,
+                ra.original_name AS reply_attachment_original_name,
+                ra.mime_type AS reply_attachment_mime_type,
+                ra.size_bytes AS reply_attachment_size_bytes,
+                ra.kind AS reply_attachment_kind
             FROM public.messages m
             JOIN public.users u
               ON u.id = m.sender_user_id
             LEFT JOIN public.attachments a
               ON a.message_id = m.id
+            LEFT JOIN public.messages rm
+              ON rm.id = m.reply_to_message_id
+             AND rm.chat_id = m.chat_id
+             AND rm.deleted_at IS NULL
+            LEFT JOIN public.users ru
+              ON ru.id = rm.sender_user_id
+            LEFT JOIN public.attachments ra
+              ON ra.message_id = rm.id
             WHERE m.id = $1
             """,
             message_id,
@@ -3477,6 +3630,8 @@ async def edit_message(
         "text": updated["text"],
         "message_type": updated["message_type"],
         "attachment": format_attachment(updated),
+        "reply_to_message_id": updated["reply_to_message_id"],
+        "reply_to_message": format_reply_message(updated, user_id),
         "created_at": updated["created_at"].isoformat() if updated["created_at"] else None,
         "edited_at": updated["edited_at"].isoformat() if updated["edited_at"] else None,
     }
