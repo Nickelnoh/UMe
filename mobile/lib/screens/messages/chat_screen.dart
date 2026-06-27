@@ -65,6 +65,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _recordingTicker;
   Duration _recordingElapsed = Duration.zero;
   double _voiceLockProgress = 0.0;
+  double? _voicePointerStartY;
+  bool _voiceLockedSendTap = false;
+  int _voiceRecordingSession = 0;
 
   String? _myUserId;
   late String _title;
@@ -979,8 +982,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _startVoiceRecording({bool locked = false}) async {
     if (_recording || _sending) return;
 
+    final session = ++_voiceRecordingSession;
+
     try {
       final hasPermission = await _recorder.hasPermission();
+
+      if (session != _voiceRecordingSession) return;
 
       if (!hasPermission) {
         _showError('Нет доступа к микрофону');
@@ -997,11 +1004,14 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
+      if (!mounted || session != _voiceRecordingSession) {
+        await _recorder.stop();
+        return;
+      }
+
       _recordSubscription = stream.listen((chunk) {
         _recordedPcmBytes.addAll(chunk);
       });
-
-      if (!mounted) return;
 
       setState(() {
         _recording = true;
@@ -1011,10 +1021,13 @@ class _ChatScreenState extends State<ChatScreen> {
         _voiceLockProgress = locked ? 1.0 : 0.0;
       });
 
+      unawaited(HapticFeedback.lightImpact());
       _startRecordingTicker();
       _sendChatActivity('recording_voice');
     } catch (e) {
-      _showError(_cleanError(e));
+      if (session == _voiceRecordingSession) {
+        _showError(_cleanError(e));
+      }
     }
   }
 
@@ -1025,17 +1038,33 @@ class _ChatScreenState extends State<ChatScreen> {
       _recordLocked = true;
       _voiceLockProgress = 1.0;
     });
+
+    unawaited(HapticFeedback.mediumImpact());
   }
 
-  Future<void> _handleMicLongPressStart(LongPressStartDetails details) async {
+  Future<void> _handleMicPointerDown(Offset globalPosition) async {
     if (_hasTextInput || _sending) return;
+
+    if (_recording && _recordLocked) {
+      _voiceLockedSendTap = true;
+      return;
+    }
+
+    if (_recording) return;
+
+    _voiceLockedSendTap = false;
+    _voicePointerStartY = globalPosition.dy;
+
     await _startVoiceRecording();
   }
 
-  void _handleMicLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
+  void _handleMicPointerMove(Offset globalPosition) {
     if (!_recording || _recordLocked) return;
 
-    final progress = (-details.offsetFromOrigin.dy / 90).clamp(0.0, 1.0);
+    final startY = _voicePointerStartY;
+    if (startY == null) return;
+
+    final progress = ((startY - globalPosition.dy) / 90).clamp(0.0, 1.0);
 
     if (progress != _voiceLockProgress && mounted) {
       setState(() {
@@ -1048,21 +1077,42 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _handleMicLongPressEnd(LongPressEndDetails details) async {
-    if (!_recording || _recordLocked) return;
+  Future<void> _handleMicPointerUp() async {
+    final sendLocked = _voiceLockedSendTap;
+    _voiceLockedSendTap = false;
+    _voicePointerStartY = null;
+
+    if (sendLocked) {
+      await _stopVoiceRecordingAndSend();
+      return;
+    }
+
+    if (!_recording) {
+      _voiceRecordingSession++;
+      return;
+    }
+
+    if (_recordLocked) return;
+
     await _stopVoiceRecordingAndSend();
   }
 
-  void _handleMicTap() {
-    if (_sending) return;
+  Future<void> _handleMicPointerCancel() async {
+    _voiceLockedSendTap = false;
+    _voicePointerStartY = null;
+    _voiceRecordingSession++;
 
-    if (_recording && _recordLocked) {
-      _stopVoiceRecordingAndSend();
-    }
+    if (!_recording || _recordLocked) return;
+
+    await _cancelVoiceRecording();
   }
 
   Future<void> _stopVoiceRecordingAndSend() async {
     if (!_recording) return;
+
+    _voiceRecordingSession++;
+    _voicePointerStartY = null;
+    _voiceLockedSendTap = false;
 
     try {
       _stopRecordingTicker();
@@ -1135,6 +1185,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _cancelVoiceRecording() async {
+    _voiceRecordingSession++;
+    _voicePointerStartY = null;
+    _voiceLockedSendTap = false;
+
     if (!_recording) return;
 
     try {
@@ -2759,11 +2813,10 @@ class _ChatScreenState extends State<ChatScreen> {
                             locked: _recordLocked,
                             lockProgress: _voiceLockProgress,
                             disabled: _sending,
-                            onTap: _handleMicTap,
-                            onLongPressStart: _handleMicLongPressStart,
-                            onLongPressMoveUpdate:
-                                _handleMicLongPressMoveUpdate,
-                            onLongPressEnd: _handleMicLongPressEnd,
+                            onPointerDown: _handleMicPointerDown,
+                            onPointerMove: _handleMicPointerMove,
+                            onPointerUp: _handleMicPointerUp,
+                            onPointerCancel: _handleMicPointerCancel,
                           ),
                       ],
                     ),
@@ -3026,10 +3079,10 @@ class _HoldToRecordButton extends StatelessWidget {
   final bool locked;
   final double lockProgress;
   final bool disabled;
-  final VoidCallback onTap;
-  final GestureLongPressStartCallback onLongPressStart;
-  final GestureLongPressMoveUpdateCallback onLongPressMoveUpdate;
-  final GestureLongPressEndCallback onLongPressEnd;
+  final Future<void> Function(Offset globalPosition) onPointerDown;
+  final void Function(Offset globalPosition) onPointerMove;
+  final Future<void> Function() onPointerUp;
+  final Future<void> Function() onPointerCancel;
 
   const _HoldToRecordButton({
     required this.accent,
@@ -3037,17 +3090,17 @@ class _HoldToRecordButton extends StatelessWidget {
     required this.locked,
     required this.lockProgress,
     required this.disabled,
-    required this.onTap,
-    required this.onLongPressStart,
-    required this.onLongPressMoveUpdate,
-    required this.onLongPressEnd,
+    required this.onPointerDown,
+    required this.onPointerMove,
+    required this.onPointerUp,
+    required this.onPointerCancel,
   });
 
   @override
   Widget build(BuildContext context) {
     final progress = lockProgress.clamp(0.0, 1.0);
     final color = recording ? (locked ? accent : Colors.redAccent) : accent;
-    final scale = recording ? 1.08 : 1.0;
+    final scale = recording ? 1.10 : 1.0;
 
     return SizedBox(
       width: 58,
@@ -3090,35 +3143,79 @@ class _HoldToRecordButton extends StatelessWidget {
           ),
           Positioned(
             bottom: 0,
-            child: GestureDetector(
-              onTap: disabled ? null : onTap,
-              onLongPressStart: disabled ? null : onLongPressStart,
-              onLongPressMoveUpdate: disabled ? null : onLongPressMoveUpdate,
-              onLongPressEnd: disabled ? null : onLongPressEnd,
+            child: Listener(
+              onPointerDown: disabled
+                  ? null
+                  : (event) => unawaited(onPointerDown(event.position)),
+              onPointerMove: disabled
+                  ? null
+                  : (event) => onPointerMove(event.position),
+              onPointerUp: disabled ? null : (_) => unawaited(onPointerUp()),
+              onPointerCancel:
+                  disabled ? null : (_) => unawaited(onPointerCancel()),
               child: AnimatedScale(
-                duration: const Duration(milliseconds: 140),
+                duration: const Duration(milliseconds: 110),
+                curve: Curves.easeOutBack,
                 scale: scale,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: disabled ? color.withValues(alpha: 0.45) : color,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      if (recording)
-                        BoxShadow(
-                          color: color.withValues(alpha: 0.38),
-                          blurRadius: 18,
-                          spreadRadius: 2,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 160),
+                      opacity: recording ? 1 : 0,
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0.0, end: recording ? 1.0 : 0.0),
+                        duration: const Duration(milliseconds: 650),
+                        curve: Curves.easeOut,
+                        builder: (context, value, child) {
+                          return Container(
+                            width: 48 + value * 22,
+                            height: 48 + value * 22,
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.18 * (1 - value)),
+                              shape: BoxShape.circle,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 140),
+                      curve: Curves.easeOut,
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: disabled ? color.withValues(alpha: 0.45) : color,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          if (recording)
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.42),
+                              blurRadius: 20,
+                              spreadRadius: 3,
+                            ),
+                        ],
+                      ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 140),
+                        transitionBuilder: (child, animation) {
+                          return ScaleTransition(
+                            scale: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Icon(
+                          locked ? Icons.lock_rounded : Icons.mic_rounded,
+                          key: ValueKey('${recording}_$locked'),
+                          color: Colors.white,
+                          size: 26,
                         ),
-                    ],
-                  ),
-                  child: Icon(
-                    recording ? Icons.mic_rounded : Icons.mic_rounded,
-                    color: Colors.white,
-                    size: 26,
-                  ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
