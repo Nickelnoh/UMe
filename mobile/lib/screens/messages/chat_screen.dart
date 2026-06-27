@@ -40,6 +40,7 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _messageController = TextEditingController();
+  final _messageFocusNode = FocusNode();
   final _scrollController = ScrollController();
   final _ws = WebSocketService();
   final _recorder = AudioRecorder();
@@ -78,6 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<int> _recordedPcmBytes = [];
   List<dynamic> _messages = [];
   Map<String, dynamic>? _pinnedMessage;
+  Map<String, dynamic>? _replyToMessage;
   final Set<String> _selectedMessageIds = <String>{};
   bool _selectionMode = false;
 
@@ -801,6 +803,82 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Map<String, dynamic> _compactReplyMessage(Map<String, dynamic> message) {
+    final rawAttachment = message['attachment'];
+
+    return {
+      'id': message['id']?.toString(),
+      'sender_user_id': message['sender_user_id']?.toString(),
+      'sender_name': message['sender_name']?.toString(),
+      'text': message['text']?.toString(),
+      'message_type': message['message_type']?.toString(),
+      'attachment': rawAttachment is Map ? Map<String, dynamic>.from(rawAttachment) : null,
+    };
+  }
+
+  String _replyPreviewSender(Map<String, dynamic> message) {
+    if (message['is_mine'] == true) return 'Вы';
+
+    final senderName = message['sender_name']?.toString().trim();
+    if (senderName != null && senderName.isNotEmpty) return senderName;
+
+    return 'Сообщение';
+  }
+
+  String _replyPreviewText(Map<String, dynamic> message) {
+    final text = message['text']?.toString().trim();
+
+    if (text != null && text.isNotEmpty) return text;
+
+    final rawAttachment = message['attachment'];
+    if (rawAttachment is Map) {
+      final attachment = Map<String, dynamic>.from(rawAttachment);
+      final name = attachment['original_name']?.toString().trim();
+      final kind = attachment['kind']?.toString();
+
+      if (name != null && name.isNotEmpty) return name;
+
+      switch (kind) {
+        case 'image':
+          return 'Фото';
+        case 'video':
+          return 'Видео';
+        case 'audio':
+          return 'Голосовое сообщение';
+        default:
+          return 'Вложение';
+      }
+    }
+
+    return 'Сообщение';
+  }
+
+  void _startReplyToMessage(Map<String, dynamic> message) {
+    if (_selectionMode || _recording) return;
+
+    final id = message['id']?.toString();
+    if (id == null || id.isEmpty) return;
+
+    HapticFeedback.lightImpact();
+
+    setState(() {
+      _replyToMessage = _compactReplyMessage(message);
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _recording) return;
+      _messageFocusNode.requestFocus();
+    });
+  }
+
+  void _clearReplyToMessage() {
+    if (_replyToMessage == null) return;
+
+    setState(() {
+      _replyToMessage = null;
+    });
+  }
+
   Future<void> _sendTextMessage() async {
     final text = _messageController.text.trim();
 
@@ -1405,17 +1483,26 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
+    final replyToMessage = _replyToMessage;
+    final replyToMessageId = replyToMessage?['id']?.toString();
+
     if (manageSendingState) {
       setState(() => _sending = true);
     }
 
     try {
+      final payload = <String, dynamic>{
+        'text': text,
+        'attachment_id': attachmentId,
+      };
+
+      if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
+        payload['reply_to_message_id'] = replyToMessageId;
+      }
+
       final message = await ApiClient.post(
         '/chats/${widget.chatId}/messages',
-        {
-          'text': text,
-          'attachment_id': attachmentId,
-        },
+        payload,
       );
 
       if (clearInput) {
@@ -1426,14 +1513,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final exists = _messages.any((item) => item['id'] == message['id']);
 
-      if (!exists) {
-        final map = Map<String, dynamic>.from(message as Map);
-        map['is_mine'] = true;
+      setState(() {
+        if (!exists) {
+          final map = Map<String, dynamic>.from(message as Map);
+          map['is_mine'] = true;
 
-        setState(() {
+          if (map['reply_to_message'] == null && replyToMessage != null) {
+            map['reply_to_message'] = Map<String, dynamic>.from(replyToMessage);
+          }
+
           _messages.add(map);
-        });
-      }
+        }
+
+        if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
+          _replyToMessage = null;
+        }
+      });
 
       _scrollToBottom();
     } catch (e) {
@@ -1480,6 +1575,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   onTap: () => Navigator.of(context).pop('remove_reaction'),
                 ),
               const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.reply_rounded),
+                title: const Text('Ответить'),
+                onTap: () => Navigator.of(context).pop('reply'),
+              ),
               if (hasText)
                 ListTile(
                   leading: const Icon(Icons.copy_rounded),
@@ -1520,6 +1620,10 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       },
     );
+
+    if (selected == 'reply') {
+      _startReplyToMessage(message);
+    }
 
     if (selected == 'copy') {
       await _copyMessageText(message);
@@ -2419,6 +2523,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingStatusTimer?.cancel();
     _remoteActivityTimer?.cancel();
     _messageController.dispose();
+    _messageFocusNode.dispose();
     _scrollController.dispose();
     _wsSubscription?.cancel();
     _recordSubscription?.cancel();
@@ -2677,11 +2782,18 @@ class _ChatScreenState extends State<ChatScreen> {
                               final item = renderItems[index];
 
                               if (item is _AlbumMessageRenderItem) {
-                                return _MediaAlbumBubble(
-                                  messages: item.messages,
-                                  accentColor: accent,
-                                  onLongPressMessage: (message) async =>
-                                      _handleMessageLongPress(message),
+                                final replyTarget = item.messages.first;
+
+                                return _SwipeReplyMessage(
+                                  enabled: !_selectionMode,
+                                  accent: accent,
+                                  onReply: () => _startReplyToMessage(replyTarget),
+                                  child: _MediaAlbumBubble(
+                                    messages: item.messages,
+                                    accentColor: accent,
+                                    onLongPressMessage: (message) async =>
+                                        _handleMessageLongPress(message),
+                                  ),
                                 );
                               }
 
@@ -2690,37 +2802,48 @@ class _ChatScreenState extends State<ChatScreen> {
 
                               final selected = _isSelected(message);
 
-                              return AnimatedContainer(
-                                duration: const Duration(milliseconds: 140),
-                                color: selected
-                                    ? accent.withValues(alpha: 0.16)
-                                    : Colors.transparent,
-                                child: MessageBubble(
-                                  text: message['text']?.toString(),
-                                  attachment: message['attachment'] == null
-                                      ? null
-                                      : Map<String, dynamic>.from(
-                                          message['attachment'] as Map,
-                                        ),
-                                  senderName:
-                                      message['sender_name']?.toString(),
-                                  isMine: message['is_mine'] == true,
-                                  editedAt: message['edited_at']?.toString(),
-                                  deliveryStatus:
-                                      message['delivery_status']?.toString(),
-                                  forwardedFromName:
-                                      message['forwarded_from_name']
-                                          ?.toString(),
-                                  pinned: message['pinned'] == true,
-                                  reactions: message['reactions'] is List
-                                      ? List<dynamic>.from(
-                                          message['reactions'] as List)
-                                      : const [],
-                                  accentColor: accent,
-                                  bubbleStyle: _bubbleStyle,
-                                  onTap: () => _handleMessageTap(message),
-                                  onLongPress: () =>
-                                      _handleMessageLongPress(message),
+                              return _SwipeReplyMessage(
+                                enabled: !_selectionMode,
+                                accent: accent,
+                                onReply: () => _startReplyToMessage(message),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 140),
+                                  color: selected
+                                      ? accent.withValues(alpha: 0.16)
+                                      : Colors.transparent,
+                                  child: MessageBubble(
+                                    text: message['text']?.toString(),
+                                    attachment: message['attachment'] == null
+                                        ? null
+                                        : Map<String, dynamic>.from(
+                                            message['attachment'] as Map,
+                                          ),
+                                    replyToMessage:
+                                        message['reply_to_message'] is Map
+                                            ? Map<String, dynamic>.from(
+                                                message['reply_to_message'] as Map,
+                                              )
+                                            : null,
+                                    senderName:
+                                        message['sender_name']?.toString(),
+                                    isMine: message['is_mine'] == true,
+                                    editedAt: message['edited_at']?.toString(),
+                                    deliveryStatus:
+                                        message['delivery_status']?.toString(),
+                                    forwardedFromName:
+                                        message['forwarded_from_name']
+                                            ?.toString(),
+                                    pinned: message['pinned'] == true,
+                                    reactions: message['reactions'] is List
+                                        ? List<dynamic>.from(
+                                            message['reactions'] as List)
+                                        : const [],
+                                    accentColor: accent,
+                                    bubbleStyle: _bubbleStyle,
+                                    onTap: () => _handleMessageTap(message),
+                                    onLongPress: () =>
+                                        _handleMessageLongPress(message),
+                                  ),
                                 ),
                               );
                             },
@@ -2742,6 +2865,24 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      switchInCurve: Curves.easeOut,
+                      switchOutCurve: Curves.easeIn,
+                      child: _replyToMessage == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              key: ValueKey(_replyToMessage?['id']),
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: _ReplyComposerBar(
+                                message: _replyToMessage!,
+                                accent: accent,
+                                sender: _replyPreviewSender(_replyToMessage!),
+                                preview: _replyPreviewText(_replyToMessage!),
+                                onCancel: _clearReplyToMessage,
+                              ),
+                            ),
+                    ),
                     if (_recording)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
@@ -2767,6 +2908,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         Expanded(
                           child: TextField(
                             controller: _messageController,
+                            focusNode: _messageFocusNode,
                             enabled: !_recording,
                             style: TextStyle(color: inputTextColor),
                             cursorColor: accent,
@@ -2826,6 +2968,215 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+class _SwipeReplyMessage extends StatefulWidget {
+  final Widget child;
+  final bool enabled;
+  final Color accent;
+  final VoidCallback onReply;
+
+  const _SwipeReplyMessage({
+    required this.child,
+    required this.enabled,
+    required this.accent,
+    required this.onReply,
+  });
+
+  @override
+  State<_SwipeReplyMessage> createState() => _SwipeReplyMessageState();
+}
+
+class _SwipeReplyMessageState extends State<_SwipeReplyMessage> {
+  static const double _triggerDistance = 74;
+  static const double _maxDragDistance = 98;
+
+  double _dragOffset = 0;
+  bool _armed = false;
+
+  void _reset() {
+    if (!mounted) return;
+
+    setState(() {
+      _dragOffset = 0;
+      _armed = false;
+    });
+  }
+
+  void _handleUpdate(DragUpdateDetails details) {
+    if (!widget.enabled) return;
+
+    final delta = details.primaryDelta ?? 0;
+    final nextOffset = (_dragOffset + delta).clamp(0.0, _maxDragDistance);
+    final shouldArm = nextOffset >= _triggerDistance;
+
+    if (shouldArm && !_armed) {
+      HapticFeedback.selectionClick();
+    }
+
+    setState(() {
+      _dragOffset = nextOffset;
+      _armed = shouldArm;
+    });
+  }
+
+  void _handleEnd([DragEndDetails? details]) {
+    if (!widget.enabled) {
+      _reset();
+      return;
+    }
+
+    final shouldReply = _dragOffset >= _triggerDistance;
+
+    _reset();
+
+    if (shouldReply) {
+      widget.onReply();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (_dragOffset / _triggerDistance).clamp(0.0, 1.0);
+    final iconScale = 0.72 + progress * 0.28;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: widget.enabled ? _handleUpdate : null,
+      onHorizontalDragEnd: widget.enabled ? _handleEnd : null,
+      onHorizontalDragCancel: widget.enabled ? _reset : null,
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        children: [
+          Positioned(
+            left: 18 + progress * 16,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 90),
+                opacity: progress,
+                child: Transform.scale(
+                  scale: iconScale,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 110),
+                    curve: Curves.easeOut,
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: _armed ? widget.accent : widget.accent.withValues(alpha: 0.74),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.accent.withValues(alpha: 0.28),
+                          blurRadius: 16,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.reply_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(_dragOffset, 0, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplyComposerBar extends StatelessWidget {
+  final Map<String, dynamic> message;
+  final Color accent;
+  final String sender;
+  final String preview;
+  final VoidCallback onCancel;
+
+  const _ReplyComposerBar({
+    required this.message,
+    required this.accent,
+    required this.sender,
+    required this.preview,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark ? const Color(0xFF111B21) : Colors.white;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accent.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 54,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(18),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Icon(Icons.reply_rounded, color: accent, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Ответ: $sender',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    preview,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.72),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Отменить ответ',
+            onPressed: onCancel,
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ],
       ),
     );
   }

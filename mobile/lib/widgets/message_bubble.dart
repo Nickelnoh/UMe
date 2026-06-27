@@ -93,6 +93,7 @@ class MessageBubble extends StatelessWidget {
   final String? editedAt;
   final String? deliveryStatus;
   final String? forwardedFromName;
+  final Map<String, dynamic>? replyToMessage;
   final bool pinned;
   final List<dynamic> reactions;
   final Color? accentColor;
@@ -109,6 +110,7 @@ class MessageBubble extends StatelessWidget {
     this.editedAt,
     this.deliveryStatus,
     this.forwardedFromName,
+    this.replyToMessage,
     this.pinned = false,
     this.reactions = const [],
     this.accentColor,
@@ -194,7 +196,9 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = accentColor ?? Theme.of(context).colorScheme.primary;
 
-    final color = isMine ? const Color(0xFFDCF8C6) : Colors.white;
+    final color = isMine
+        ? const Color(0xFFDCF8C6)
+        : Colors.white;
 
     final textColor = const Color(0xFF111111);
 
@@ -286,17 +290,13 @@ class MessageBubble extends StatelessWidget {
                             const SizedBox(width: 4),
                             ConstrainedBox(
                               constraints: BoxConstraints(
-                                maxWidth:
-                                    MediaQuery.of(context).size.width * 0.52,
+                                maxWidth: MediaQuery.of(context).size.width * 0.52,
                               ),
                               child: Text(
                                 'Переслано от ${forwardedFromName!}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelSmall
-                                    ?.copyWith(
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                       color: textColor.withValues(alpha: 0.66),
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -318,10 +318,7 @@ class MessageBubble extends StatelessWidget {
                             const SizedBox(width: 4),
                             Text(
                               'Закреплено',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                     color: textColor.withValues(alpha: 0.66),
                                     fontWeight: FontWeight.w700,
                                   ),
@@ -329,6 +326,14 @@ class MessageBubble extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 5),
+                      ],
+                      if (replyToMessage != null) ...[
+                        _ReplyPreviewInBubble(
+                          message: replyToMessage!,
+                          accent: accent,
+                          textColor: textColor,
+                        ),
+                        const SizedBox(height: 7),
                       ],
                       if (attachment != null) ...[
                         _AttachmentPreview(
@@ -391,6 +396,105 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
+
+class _ReplyPreviewInBubble extends StatelessWidget {
+  final Map<String, dynamic> message;
+  final Color accent;
+  final Color textColor;
+
+  const _ReplyPreviewInBubble({
+    required this.message,
+    required this.accent,
+    required this.textColor,
+  });
+
+  String _senderName() {
+    final sender = message['sender_name']?.toString().trim();
+    return sender != null && sender.isNotEmpty ? sender : 'Сообщение';
+  }
+
+  String _previewText() {
+    final text = message['text']?.toString().trim();
+    if (text != null && text.isNotEmpty) return text;
+
+    final rawAttachment = message['attachment'];
+    if (rawAttachment is Map) {
+      final attachment = Map<String, dynamic>.from(rawAttachment);
+      final name = attachment['original_name']?.toString().trim();
+      final kind = attachment['kind']?.toString();
+
+      if (name != null && name.isNotEmpty) return name;
+
+      switch (kind) {
+        case 'image':
+          return 'Фото';
+        case 'video':
+          return 'Видео';
+        case 'audio':
+          return 'Голосовое сообщение';
+        default:
+          return 'Вложение';
+      }
+    }
+
+    return 'Сообщение';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.58,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.52),
+        borderRadius: BorderRadius.circular(12),
+        border: Border(
+          left: BorderSide(
+            color: accent,
+            width: 4,
+          ),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(9, 7, 9, 7),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.reply_rounded, size: 13, color: accent),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  _senderName(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: accent,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            _previewText(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: textColor.withValues(alpha: 0.72),
+                  height: 1.15,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ReactionBar extends StatelessWidget {
   final List<dynamic> reactions;
   final Color accentColor;
@@ -409,8 +513,9 @@ class _ReactionBar extends StatelessWidget {
       runSpacing: 4,
       alignment: isMine ? WrapAlignment.end : WrapAlignment.start,
       children: reactions.map((raw) {
-        final reaction =
-            raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+        final reaction = raw is Map
+            ? Map<String, dynamic>.from(raw)
+            : <String, dynamic>{};
 
         final mine = reaction['is_mine'] == true;
         final type = reaction['reaction_type']?.toString();
@@ -487,6 +592,7 @@ class _ReactionBar extends StatelessWidget {
   }
 }
 
+
 Future<void> _exportDownloadedAttachment(
   BuildContext context,
   DownloadedAttachment entry,
@@ -560,8 +666,7 @@ Future<void> _showAttachmentSaveSheet(
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('Сохранить в галерею'),
-                subtitle: const Text(
-                    'В браузере файл сохранится через системную загрузку'),
+                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
                 onTap: () => _exportDownloadedAttachment(
                   sheetContext,
                   entry,
@@ -572,8 +677,7 @@ Future<void> _showAttachmentSaveSheet(
               ListTile(
                 leading: const Icon(Icons.music_note_rounded),
                 title: const Text('Сохранить в музыку'),
-                subtitle: const Text(
-                    'В браузере файл сохранится через системную загрузку'),
+                subtitle: const Text('В браузере файл сохранится через системную загрузку'),
                 onTap: () => _exportDownloadedAttachment(
                   sheetContext,
                   entry,
@@ -583,8 +687,7 @@ Future<void> _showAttachmentSaveSheet(
             ListTile(
               leading: const Icon(Icons.folder_copy_outlined),
               title: const Text('Сохранить в загрузки'),
-              subtitle: const Text(
-                  'Скачать файл из внутреннего кеша UMe на устройство'),
+              subtitle: const Text('Скачать файл из внутреннего кеша UMe на устройство'),
               onTap: () => _exportDownloadedAttachment(
                 sheetContext,
                 entry,
@@ -625,11 +728,9 @@ class _AttachmentPreview extends StatefulWidget {
 
 class _AttachmentPreviewState extends State<_AttachmentPreview> {
   String get _kind => widget.attachment['kind']?.toString() ?? 'other';
-  String get _url =>
-      ApiClient.absoluteUrl(widget.attachment['url']?.toString());
+  String get _url => ApiClient.absoluteUrl(widget.attachment['url']?.toString());
   String get _name => widget.attachment['original_name']?.toString() ?? 'file';
-  String get _mimeType =>
-      widget.attachment['mime_type']?.toString() ?? 'application/octet-stream';
+  String get _mimeType => widget.attachment['mime_type']?.toString() ?? 'application/octet-stream';
 
   bool get _hasDownloadableUrl => _url.trim().isNotEmpty;
 
@@ -795,6 +896,7 @@ class _AttachmentPreviewState extends State<_AttachmentPreview> {
   }
 }
 
+
 class _AudioPlayerCard extends StatefulWidget {
   final String url;
   final String name;
@@ -819,7 +921,6 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
 
   bool _isPlaying = false;
   bool _sourceReady = false;
-  bool _sourceFailed = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
 
@@ -837,6 +938,8 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
     if (estimated != null) {
       _duration = estimated;
     }
+
+    unawaited(_prepareSource());
 
     _player.onDurationChanged.listen((duration) {
       if (!mounted) return;
@@ -880,7 +983,7 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
   }
 
   Future<void> _prepareSource() async {
-    if (_sourceReady || _sourceFailed) return;
+    if (_sourceReady) return;
 
     try {
       final cached = AttachmentDownloadStore.get(widget.url);
@@ -900,12 +1003,7 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
         }
       });
     } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        _sourceFailed = true;
-        _isPlaying = false;
-      });
+      // Duration can still arrive through onDurationChanged after playback starts.
     }
   }
 
@@ -921,26 +1019,14 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
   Future<void> _playFromQueue() async {
     await _prepareSource();
 
-    if (_sourceFailed) return;
-
     try {
       await _player.resume();
     } catch (_) {
-      try {
-        final cached = AttachmentDownloadStore.get(widget.url);
-        if (cached != null) {
-          await _player.play(BytesSource(cached.bytes));
-        } else {
-          await _player.play(UrlSource(widget.url));
-        }
-      } catch (_) {
-        if (!mounted) return;
-
-        setState(() {
-          _sourceFailed = true;
-          _isPlaying = false;
-        });
-        return;
+      final cached = AttachmentDownloadStore.get(widget.url);
+      if (cached != null) {
+        await _player.play(BytesSource(cached.bytes));
+      } else {
+        await _player.play(UrlSource(widget.url));
       }
     }
 
@@ -1008,11 +1094,9 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
       child: Row(
         children: [
           IconButton.filledTonal(
-            onPressed: _sourceFailed ? null : _toggle,
+            onPressed: _toggle,
             icon: Icon(
-              _sourceFailed
-                  ? Icons.error_outline_rounded
-                  : (_isPlaying ? Icons.pause : Icons.play_arrow),
+              _isPlaying ? Icons.pause : Icons.play_arrow,
             ),
           ),
           const SizedBox(width: 8),
@@ -1028,7 +1112,6 @@ class _AudioPlayerCardState extends State<_AudioPlayerCard> {
                 if (!mounted) return;
                 setState(() {
                   _sourceReady = false;
-                  _sourceFailed = false;
                 });
                 unawaited(_prepareSource());
               },
@@ -1215,8 +1298,7 @@ class _AttachmentDownloadButton extends StatefulWidget {
   });
 
   @override
-  State<_AttachmentDownloadButton> createState() =>
-      _AttachmentDownloadButtonState();
+  State<_AttachmentDownloadButton> createState() => _AttachmentDownloadButtonState();
 }
 
 class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
@@ -1290,8 +1372,7 @@ class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
     final size = widget.compact ? 38.0 : 42.0;
     final iconSize = widget.compact ? 19.0 : 21.0;
     final background = widget.backgroundColor ?? const Color(0xFF1F2C34);
-    final foreground =
-        widget.backgroundColor == null ? Colors.white : widget.textColor;
+    final foreground = widget.backgroundColor == null ? Colors.white : widget.textColor;
 
     return Tooltip(
       message: _downloaded ? 'Открыть скачанное' : 'Скачать внутри UMe',
@@ -1322,9 +1403,7 @@ class _AttachmentDownloadButtonState extends State<_AttachmentDownloadButton> {
                   ),
                 ),
               Icon(
-                _downloaded
-                    ? Icons.download_done_rounded
-                    : Icons.arrow_downward_rounded,
+                _downloaded ? Icons.download_done_rounded : Icons.arrow_downward_rounded,
                 color: foreground,
                 size: iconSize,
               ),
@@ -1368,8 +1447,7 @@ class _DownloadedFileDialog extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
-          Text(
-              'Размер: ${AttachmentDownloadStore.formatSize(entry.sizeBytes)}'),
+          Text('Размер: ${AttachmentDownloadStore.formatSize(entry.sizeBytes)}'),
           Text('Тип: ${entry.mimeType}'),
           const SizedBox(height: 12),
           const Text(
@@ -1386,6 +1464,7 @@ class _DownloadedFileDialog extends StatelessWidget {
     );
   }
 }
+
 
 class _ImageViewerDialog extends StatelessWidget {
   final String url;
@@ -1517,8 +1596,9 @@ class _VideoViewerDialogState extends State<_VideoViewerDialog> {
     final position = _ready ? _controller.value.position : Duration.zero;
     final duration = _ready ? _controller.value.duration : Duration.zero;
 
-    final max =
-        duration.inMilliseconds <= 0 ? 1.0 : duration.inMilliseconds.toDouble();
+    final max = duration.inMilliseconds <= 0
+        ? 1.0
+        : duration.inMilliseconds.toDouble();
 
     final current = position.inMilliseconds.clamp(0, max.toInt()).toDouble();
 
